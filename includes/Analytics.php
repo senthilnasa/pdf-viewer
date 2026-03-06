@@ -231,6 +231,76 @@ class Analytics
     }
 
     // -------------------------------------------------------------------------
+    // User statistics
+    // -------------------------------------------------------------------------
+
+    public static function getUserStats(): array
+    {
+        $byRole = Database::fetchAll(
+            "SELECT role, COUNT(*) AS count FROM users WHERE status = 'active'
+             GROUP BY role ORDER BY FIELD(role,'admin','editor','viewer')"
+        );
+        $total    = (int)Database::fetchScalar("SELECT COUNT(*) FROM users");
+        $active   = (int)Database::fetchScalar("SELECT COUNT(*) FROM users WHERE status = 'active'");
+        $inactive = $total - $active;
+        return ['by_role' => $byRole, 'total' => $total, 'active' => $active, 'inactive' => $inactive];
+    }
+
+    // -------------------------------------------------------------------------
+    // Hourly activity heatmap (weekday 0=Sun…6=Sat  x  hour 0-23)
+    // -------------------------------------------------------------------------
+
+    public static function getHourlyHeatmap(int $days = 30): array
+    {
+        $rows = Database::fetchAll(
+            "SELECT (DAYOFWEEK(visit_time)-1) AS weekday,
+                    HOUR(visit_time)          AS hour,
+                    COUNT(*)                  AS views
+             FROM pdf_views
+             WHERE visit_time >= DATE_SUB(NOW(), INTERVAL ? DAY)
+             GROUP BY weekday, hour",
+            [$days]
+        );
+
+        $map = [];
+        foreach ($rows as $row) {
+            $map[(int)$row['weekday']][(int)$row['hour']] = (int)$row['views'];
+        }
+
+        $result = [];
+        for ($w = 0; $w < 7; $w++) {
+            for ($h = 0; $h < 24; $h++) {
+                $result[] = ['weekday' => $w, 'hour' => $h, 'views' => $map[$w][$h] ?? 0];
+            }
+        }
+        return $result;
+    }
+
+    // -------------------------------------------------------------------------
+    // Views per hour-of-day aggregate (for area sparkline)
+    // -------------------------------------------------------------------------
+
+    public static function getViewsPerHour(int $days = 30): array
+    {
+        $rows = Database::fetchAll(
+            "SELECT HOUR(visit_time) AS hour, COUNT(*) AS views
+             FROM pdf_views
+             WHERE visit_time >= DATE_SUB(NOW(), INTERVAL ? DAY)
+             GROUP BY hour ORDER BY hour ASC",
+            [$days]
+        );
+        $map = [];
+        foreach ($rows as $r) {
+            $map[(int)$r['hour']] = (int)$r['views'];
+        }
+        $result = [];
+        for ($h = 0; $h < 24; $h++) {
+            $result[] = ['hour' => $h, 'views' => $map[$h] ?? 0];
+        }
+        return $result;
+    }
+
+    // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
 

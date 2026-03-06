@@ -11,13 +11,20 @@
 function bootstrap(): array
 {
     $appConfig = ROOT . '/config/app.php';
+    $base      = rtrim(dirname($_SERVER['SCRIPT_NAME'] ?? ''), '/');
+    $installer = $base . '/install.php';
+
     if (!file_exists($appConfig)) {
-        $base = rtrim(dirname($_SERVER['SCRIPT_NAME'] ?? ''), '/');
-        $installer = $base . '/install.php';
         header('Location: ' . $installer);
         exit;
     }
     $config = require $appConfig;
+    if (!is_array($config)) {
+        // Config file exists but is empty/malformed — delete and re-run installer
+        @unlink($appConfig);
+        header('Location: ' . $installer);
+        exit;
+    }
     date_default_timezone_set($config['timezone'] ?? 'UTC');
 
     // Start auth / session

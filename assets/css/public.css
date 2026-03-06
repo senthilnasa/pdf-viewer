@@ -1,0 +1,172 @@
+/* PDF Viewer Platform — Public CSS */
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+    font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+    font-size: 15px;
+    color: #1e293b;
+    background: #f8fafc;
+    line-height: 1.6;
+}
+
+.container {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 0 1.25rem;
+}
+
+/* Site header */
+.site-header {
+    background: #1e293b;
+    color: #fff;
+    padding: 1rem 0;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    box-shadow: 0 2px 8px rgba(0,0,0,.15);
+}
+
+.site-header .container {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.logo {
+    font-weight: 800;
+    font-size: 1.2rem;
+    color: #fff;
+    text-decoration: none;
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+}
+
+.site-header nav {
+    display: flex;
+    gap: 1.25rem;
+}
+
+.site-header nav a {
+    color: rgba(255,255,255,.75);
+    text-decoration: none;
+    font-size: .875rem;
+    transition: color .15s;
+}
+
+.site-header nav a:hover { color: #fff; }
+
+/* Page header */
+.page-header {
+    padding: 2.5rem 0 1.5rem;
+}
+
+.page-header h1 {
+    font-size: 1.8rem;
+    font-weight: 800;
+    color: #1e293b;
+}
+
+.page-header p {
+    color: #64748b;
+    margin-top: .35rem;
+}
+
+/* Doc grid */
+.doc-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 1.25rem;
+    padding-bottom: 3rem;
+}
+
+.doc-card {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 1.25rem;
+    display: flex;
+    gap: 1rem;
+    text-decoration: none;
+    color: inherit;
+    transition: box-shadow .2s, transform .15s;
+}
+
+.doc-card:hover {
+    box-shadow: 0 8px 24px rgba(0,0,0,.1);
+    transform: translateY(-2px);
+}
+
+.doc-icon {
+    width: 48px;
+    height: 48px;
+    background: #ede9fe;
+    color: #7c3aed;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.doc-icon svg { width: 24px; height: 24px; }
+
+.doc-info { overflow: hidden; }
+
+.doc-info h3 {
+    font-size: .95rem;
+    font-weight: 700;
+    color: #1e293b;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.doc-info p {
+    font-size: .82rem;
+    color: #64748b;
+    margin-top: .2rem;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.doc-views {
+    display: inline-block;
+    margin-top: .5rem;
+    font-size: .75rem;
+    color: #94a3b8;
+}
+
+/* Empty state */
+.empty-state {
+    text-align: center;
+    padding: 4rem 1rem;
+    color: #94a3b8;
+}
+
+.empty-state svg { margin: 0 auto 1rem; display: block; }
+
+.empty-state p { font-size: 1rem; }
+
+/* Site footer */
+.site-footer {
+    background: #1e293b;
+    color: rgba(255,255,255,.5);
+    padding: 1.25rem 0;
+    font-size: .82rem;
+}
+
+.site-footer a {
+    color: rgba(255,255,255,.6);
+    text-decoration: none;
+}
+
+.site-footer a:hover { color: #fff; }
+
+@media (max-width: 480px) {
+    .page-header h1 { font-size: 1.4rem; }
+    .doc-grid { grid-template-columns: 1fr; }
+}

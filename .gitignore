@@ -1,0 +1,80 @@
+# ---------------------------------------------------------------
+# PDF Viewer Platform — .gitignore
+# ---------------------------------------------------------------
+
+# Uploaded PDF files and logos — never commit user data
+uploads/*.pdf
+uploads/logo_*
+uploads/*.png
+uploads/*.jpg
+uploads/*.jpeg
+uploads/*.gif
+uploads/*.webp
+uploads/*.svg
+
+# Keep the directory itself
+!uploads/.gitkeep
+!uploads/.htaccess
+
+# Config files with real credentials
+# (Keep sample / template configs, ignore live ones)
+config/database.php
+config/app.php
+
+# Keep sample configs
+!config/database.php.example
+!config/app.php.example
+
+# Installer (should be deleted after setup, but ignore if forgotten)
+install.php
+
+# Environment / secrets
+.env
+.env.*
+*.env
+#keep .env.example
+!.env.example
+# Composer (if ever added)
+vendor/
+composer.lock
+
+# Node / npm (not used, but safety net)
+node_modules/
+package-lock.json
+yarn.lock
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+*.sublime-project
+*.sublime-workspace
+
+# PHP logs
+*.log
+error_log
+php_errors.log
+
+# Temp / cache
+*.tmp
+*.bak
+*.cache
+
+# Docker local overrides
+docker-compose.override.yml
+docker-compose.local.yml
+
+# SSL certificates (for local Docker dev)
+docker/certs/*.pem
+docker/certs/*.crt
+docker/certs/*.key

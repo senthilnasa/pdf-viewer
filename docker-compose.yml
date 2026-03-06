@@ -1,0 +1,88 @@
+# ---------------------------------------------------------------
+# PDF Viewer Platform — Docker Compose
+# Services: app (PHP/Apache), db (MySQL 8), phpmyadmin (optional)
+# ---------------------------------------------------------------
+
+services:
+
+  # ---- PHP / Apache Application --------------------------------
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pdfviewer_app
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-8080}:80"
+    volumes:
+      # Persist uploads and config outside the container
+      - pdfviewer_uploads:/var/www/html/uploads
+      - pdfviewer_config:/var/www/html/config
+      # For development: mount source live (comment out in prod)
+      # - .:/var/www/html
+    environment:
+      DB_HOST:     db
+      DB_PORT:     3306
+      DB_NAME:     "${DB_NAME:-pdf_viewer}"
+      DB_USER:     "${DB_USER:-pdfviewer}"
+      DB_PASS:     "${DB_PASS:-secret}"
+      APP_BASE_URL: "${APP_BASE_URL:-http://localhost:8080}"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - pdfviewer_net
+
+  # ---- MySQL 8 Database ----------------------------------------
+  db:
+    image: mysql:8.0
+    container_name: pdfviewer_db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: "${DB_ROOT_PASS:-rootsecret}"
+      MYSQL_DATABASE:      "${DB_NAME:-pdf_viewer}"
+      MYSQL_USER:          "${DB_USER:-pdfviewer}"
+      MYSQL_PASSWORD:      "${DB_PASS:-secret}"
+    volumes:
+      - pdfviewer_db:/var/lib/mysql
+      # Auto-import schema on first start
+      - ./database.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    ports:
+      - "${DB_PORT_EXPOSE:-3306}:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${DB_ROOT_PASS:-rootsecret}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - pdfviewer_net
+
+  # ---- phpMyAdmin (optional, dev helper) -----------------------
+  phpmyadmin:
+    image: phpmyadmin:latest
+    container_name: pdfviewer_pma
+    restart: unless-stopped
+    environment:
+      PMA_HOST:     db
+      PMA_PORT:     3306
+      PMA_USER:     root
+      PMA_PASSWORD: "${DB_ROOT_PASS:-rootsecret}"
+    ports:
+      - "${PMA_PORT:-8081}:80"
+    depends_on:
+      - db
+    networks:
+      - pdfviewer_net
+    profiles:
+      - tools   # Only starts with: docker compose --profile tools up
+
+# ---------------------------------------------------------------
+volumes:
+  pdfviewer_db:
+  pdfviewer_uploads:
+  pdfviewer_config:
+
+networks:
+  pdfviewer_net:
+    driver: bridge

@@ -1,0 +1,93 @@
+# PDF Viewer Platform - Apache Configuration
+# github.com/senthilnasa/pdf-viewer
+
+Options -Indexes
+ServerSignature Off
+
+# ----------------------------------------------------------
+# Compression
+# ----------------------------------------------------------
+<IfModule mod_deflate.c>
+    AddOutputFilterByType DEFLATE text/html text/css application/javascript application/json text/xml
+</IfModule>
+
+# ----------------------------------------------------------
+# Browser caching
+# ----------------------------------------------------------
+<IfModule mod_expires.c>
+    ExpiresActive On
+    ExpiresByType text/css "access plus 1 month"
+    ExpiresByType application/javascript "access plus 1 month"
+    ExpiresByType image/png "access plus 1 year"
+    ExpiresByType image/jpg "access plus 1 year"
+    ExpiresByType image/jpeg "access plus 1 year"
+    ExpiresByType image/gif "access plus 1 year"
+    ExpiresByType image/svg+xml "access plus 1 year"
+    ExpiresByType application/pdf "access plus 1 week"
+</IfModule>
+
+# ----------------------------------------------------------
+# Security headers
+# ----------------------------------------------------------
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "SAMEORIGIN"
+    Header always set X-XSS-Protection "1; mode=block"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+</IfModule>
+
+# ----------------------------------------------------------
+# Deny direct access to sensitive directories/files
+# ----------------------------------------------------------
+<FilesMatch "^(config|includes|uploads)/.*">
+    Order allow,deny
+    Deny from all
+</FilesMatch>
+
+# Block direct access to config directory
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Block access to config and includes
+    RewriteRule ^config/ - [F,L]
+    RewriteRule ^includes/ - [F,L]
+
+    # Protect uploads — only allow serving PDFs through viewer
+    RewriteRule ^uploads/.*\.php$ - [F,L]
+
+    # ----------------------------------------------------------
+    # URL Routing
+    # ----------------------------------------------------------
+
+    # Skip rewriting for existing files/dirs
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+
+    # PDF viewer: /pdf/{slug}
+    RewriteRule ^pdf/([a-z0-9_-]+)/?$ viewer/index.php?slug=$1 [QSA,L]
+
+    # PDF viewer with share token: /pdf/{slug}?token=xxx handled by query string
+    # (no extra rule needed — QSA passes the token)
+
+    # Sitemap
+    RewriteRule ^sitemap\.xml$ index.php?route=sitemap [QSA,L]
+
+    # Admin login shortcut
+    RewriteRule ^admin/?$ admin/index.php [QSA,L]
+    RewriteRule ^logout/?$ api/auth.php?action=logout [QSA,L]
+
+    # Main router fallback
+    RewriteRule ^$ index.php [QSA,L]
+</IfModule>
+
+# ----------------------------------------------------------
+# PHP settings (shared hosting compatible)
+# ----------------------------------------------------------
+<IfModule mod_php.c>
+    php_flag display_errors Off
+    php_flag log_errors On
+    php_value upload_max_filesize 52M
+    php_value post_max_size 55M
+    php_value max_execution_time 120
+    php_value memory_limit 128M
+</IfModule>

@@ -1,0 +1,496 @@
+/* PDF Viewer Platform — Viewer CSS */
+
+:root {
+    --toolbar-h:  52px;
+    --header-h:   60px;
+    --footer-h:   38px;
+    --thumb-w:    180px;
+    --canvas-bg-dark:  #1a1a2e;
+    --canvas-bg-light: #f0f4f8;
+    --toolbar-bg-dark:  #0f172a;
+    --toolbar-bg-light: #ffffff;
+    --toolbar-border-dark:  rgba(255,255,255,.08);
+    --toolbar-border-light: #e2e8f0;
+    --toolbar-color-dark:  #e2e8f0;
+    --toolbar-color-light: #1e293b;
+    --thumb-bg-dark:  #0f172a;
+    --thumb-bg-light: #f8fafc;
+    --accent: #4f46e5;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body { height: 100%; }
+
+body {
+    font-family: system-ui, -apple-system, sans-serif;
+    font-size: 14px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+/* ------------------------------------------------------------------ */
+/* Theme tokens                                                        */
+/* ------------------------------------------------------------------ */
+
+.viewer-theme-dark {
+    --canvas-bg:        var(--canvas-bg-dark);
+    --toolbar-bg:       var(--toolbar-bg-dark);
+    --toolbar-border:   var(--toolbar-border-dark);
+    --toolbar-color:    var(--toolbar-color-dark);
+    --thumb-bg:         var(--thumb-bg-dark);
+    --thumb-border:     rgba(255,255,255,.06);
+    --tool-btn-hover:   rgba(255,255,255,.08);
+    --tool-btn-active:  rgba(79,70,229,.4);
+}
+
+.viewer-theme-light {
+    --canvas-bg:        var(--canvas-bg-light);
+    --toolbar-bg:       var(--toolbar-bg-light);
+    --toolbar-border:   var(--toolbar-border-light);
+    --toolbar-color:    var(--toolbar-color-light);
+    --thumb-bg:         var(--thumb-bg-light);
+    --thumb-border:     #e2e8f0;
+    --tool-btn-hover:   rgba(0,0,0,.05);
+    --tool-btn-active:  rgba(79,70,229,.1);
+}
+
+@media (prefers-color-scheme: dark) {
+    .viewer-theme-auto {
+        --canvas-bg:        var(--canvas-bg-dark);
+        --toolbar-bg:       var(--toolbar-bg-dark);
+        --toolbar-border:   var(--toolbar-border-dark);
+        --toolbar-color:    var(--toolbar-color-dark);
+        --thumb-bg:         var(--thumb-bg-dark);
+        --thumb-border:     rgba(255,255,255,.06);
+        --tool-btn-hover:   rgba(255,255,255,.08);
+        --tool-btn-active:  rgba(79,70,229,.4);
+    }
+}
+@media (prefers-color-scheme: light) {
+    .viewer-theme-auto {
+        --canvas-bg:        var(--canvas-bg-light);
+        --toolbar-bg:       var(--toolbar-bg-light);
+        --toolbar-border:   var(--toolbar-border-light);
+        --toolbar-color:    var(--toolbar-color-light);
+        --thumb-bg:         var(--thumb-bg-light);
+        --thumb-border:     #e2e8f0;
+        --tool-btn-hover:   rgba(0,0,0,.05);
+        --tool-btn-active:  rgba(79,70,229,.1);
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* Viewer Header                                                       */
+/* ------------------------------------------------------------------ */
+
+.viewer-header {
+    height: var(--header-h);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 1.25rem;
+    gap: 1rem;
+    flex-shrink: 0;
+    z-index: 20;
+}
+
+.viewer-header-left {
+    display: flex;
+    align-items: center;
+    gap: .85rem;
+    overflow: hidden;
+}
+
+.header-logo {
+    height: 40px;
+    max-width: 120px;
+    object-fit: contain;
+    flex-shrink: 0;
+    border-radius: 4px;
+}
+
+.header-logo-placeholder {
+    width: 40px;
+    height: 40px;
+    border-radius: 6px;
+    background: rgba(255,255,255,.1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.header-titles { overflow: hidden; }
+
+.header-title {
+    font-size: 1rem;
+    font-weight: 700;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.header-subtitle {
+    font-size: .75rem;
+    opacity: .7;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.viewer-header-right {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex-shrink: 0;
+}
+
+.file-info {
+    display: flex;
+    align-items: center;
+    gap: .75rem;
+    font-size: .78rem;
+    opacity: .8;
+}
+
+.file-info-item {
+    display: flex;
+    align-items: center;
+    gap: .25rem;
+}
+
+.header-actions {
+    display: flex;
+    align-items: center;
+    gap: .4rem;
+}
+
+.viewer-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: .35rem;
+    padding: .4rem .85rem;
+    border-radius: 6px;
+    border: 1px solid rgba(255,255,255,.2);
+    background: rgba(255,255,255,.1);
+    color: inherit;
+    font-size: .8rem;
+    font-weight: 500;
+    cursor: pointer;
+    text-decoration: none;
+    transition: background .15s;
+}
+
+.viewer-btn:hover { background: rgba(255,255,255,.2); }
+
+/* ------------------------------------------------------------------ */
+/* Share panel                                                         */
+/* ------------------------------------------------------------------ */
+
+.share-panel {
+    display: none;
+    position: fixed;
+    top: calc(var(--header-h) + var(--toolbar-h));
+    right: 1rem;
+    z-index: 50;
+    width: 340px;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    box-shadow: 0 8px 32px rgba(0,0,0,.15);
+}
+
+.share-panel.open { display: block; }
+
+.share-panel-inner { padding: 1.25rem; }
+.share-panel-inner h4 { font-size: .9rem; font-weight: 700; color: #1e293b; margin-bottom: 1rem; }
+
+.share-url-row {
+    display: flex;
+    gap: .5rem;
+    margin-bottom: .85rem;
+}
+
+.share-url-row input {
+    flex: 1;
+    padding: .45rem .7rem;
+    font-size: .78rem;
+    border: 1.5px solid #e2e8f0;
+    border-radius: 6px;
+    color: #1e293b;
+}
+
+.viewer-btn-sm {
+    padding: .4rem .75rem;
+    background: #4f46e5;
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    font-size: .78rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background .15s;
+    white-space: nowrap;
+}
+
+.viewer-btn-sm:hover { background: #4338ca; }
+
+.share-social { display: flex; gap: .5rem; flex-wrap: wrap; }
+
+.share-social-btn {
+    padding: .4rem .85rem;
+    border-radius: 6px;
+    font-size: .78rem;
+    font-weight: 600;
+    text-decoration: none;
+    color: #fff;
+}
+
+.share-social-btn.twitter  { background: #000; }
+.share-social-btn.linkedin { background: #0a66c2; }
+.share-social-btn.email    { background: #64748b; }
+
+/* ------------------------------------------------------------------ */
+/* Toolbar                                                             */
+/* ------------------------------------------------------------------ */
+
+.viewer-toolbar {
+    height: var(--toolbar-h);
+    background: var(--toolbar-bg);
+    border-bottom: 1px solid var(--toolbar-border);
+    color: var(--toolbar-color);
+    display: flex;
+    align-items: center;
+    padding: 0 .75rem;
+    gap: .25rem;
+    flex-shrink: 0;
+    z-index: 20;
+}
+
+.toolbar-group {
+    display: flex;
+    align-items: center;
+    gap: .2rem;
+    padding: 0 .4rem;
+    border-right: 1px solid var(--toolbar-border);
+}
+
+.toolbar-group:last-of-type { border-right: none; }
+
+.tool-btn {
+    width: 34px;
+    height: 34px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    color: var(--toolbar-color);
+    transition: background .12s;
+    flex-shrink: 0;
+}
+
+.tool-btn:hover { background: var(--tool-btn-hover); }
+.tool-btn-active { background: var(--tool-btn-active); }
+
+.page-input-group {
+    display: flex;
+    align-items: center;
+    gap: .3rem;
+    font-size: .85rem;
+}
+
+.page-input-group input {
+    width: 46px;
+    text-align: center;
+    padding: .3rem .3rem;
+    border: 1.5px solid var(--toolbar-border);
+    border-radius: 5px;
+    background: rgba(255,255,255,.06);
+    color: var(--toolbar-color);
+    font-size: .85rem;
+}
+
+.page-sep, #pageCount { opacity: .65; }
+
+.zoom-select {
+    padding: .3rem .5rem;
+    border: 1.5px solid var(--toolbar-border);
+    border-radius: 5px;
+    background: rgba(255,255,255,.06);
+    color: var(--toolbar-color);
+    font-size: .82rem;
+    cursor: pointer;
+}
+
+.toolbar-loading {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    font-size: .8rem;
+    opacity: .7;
+}
+
+.toolbar-loading.hidden { display: none; }
+
+.spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid rgba(255,255,255,.2);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin .7s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ------------------------------------------------------------------ */
+/* Search bar                                                          */
+/* ------------------------------------------------------------------ */
+
+.search-bar {
+    height: 44px;
+    background: var(--toolbar-bg);
+    border-bottom: 1px solid var(--toolbar-border);
+    display: flex;
+    align-items: center;
+    padding: 0 1rem;
+    gap: .5rem;
+    flex-shrink: 0;
+}
+
+.search-bar input {
+    flex: 1;
+    max-width: 360px;
+    padding: .35rem .7rem;
+    border: 1.5px solid var(--toolbar-border);
+    border-radius: 6px;
+    background: rgba(255,255,255,.06);
+    color: var(--toolbar-color);
+    font-size: .85rem;
+}
+
+/* ------------------------------------------------------------------ */
+/* Viewer Layout                                                       */
+/* ------------------------------------------------------------------ */
+
+.viewer-layout {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+}
+
+.viewer-thumbnails {
+    width: var(--thumb-w);
+    background: var(--thumb-bg);
+    border-right: 1px solid var(--thumb-border);
+    overflow-y: auto;
+    flex-shrink: 0;
+    transition: width .2s;
+}
+
+.viewer-thumbnails.hidden { width: 0; overflow: hidden; }
+
+.viewer-canvas-area {
+    flex: 1;
+    background: var(--canvas-bg);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.canvas-scroll {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: auto;
+    padding: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+#pdfContainer {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem;
+}
+
+/* Page wrappers */
+.pdf-page-wrapper {
+    position: relative;
+    box-shadow: 0 4px 24px rgba(0,0,0,.5);
+    border-radius: 2px;
+    overflow: hidden;
+    flex-shrink: 0;
+}
+
+.pdf-page-wrapper canvas { display: block; }
+
+.page-loading-placeholder {
+    background: rgba(255,255,255,.04);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: rgba(255,255,255,.2);
+    font-size: .8rem;
+}
+
+/* Thumbnail */
+.thumbnail-item {
+    padding: .6rem .5rem .4rem;
+    cursor: pointer;
+    text-align: center;
+    border-bottom: 1px solid var(--thumb-border);
+    transition: background .12s;
+}
+
+.thumbnail-item:hover { background: rgba(255,255,255,.05); }
+.thumbnail-item.active { background: rgba(79,70,229,.2); }
+
+.thumbnail-item canvas {
+    display: block;
+    margin: 0 auto;
+    box-shadow: 0 2px 8px rgba(0,0,0,.3);
+    border-radius: 1px;
+}
+
+.thumbnail-label {
+    font-size: .7rem;
+    color: rgba(255,255,255,.4);
+    margin-top: .3rem;
+}
+
+.viewer-theme-light .thumbnail-label { color: #94a3b8; }
+
+/* ------------------------------------------------------------------ */
+/* Viewer Footer                                                       */
+/* ------------------------------------------------------------------ */
+
+.viewer-footer {
+    height: var(--footer-h);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 1.25rem;
+    font-size: .8rem;
+    flex-shrink: 0;
+    border-top: 1px solid rgba(0,0,0,.05);
+}
+
+/* ------------------------------------------------------------------ */
+/* Responsive                                                          */
+/* ------------------------------------------------------------------ */
+
+@media (max-width: 640px) {
+    .viewer-thumbnails { display: none; }
+    .file-info { display: none; }
+    .header-subtitle { display: none; }
+    .viewer-header { padding: 0 .75rem; }
+    .canvas-scroll { padding: .75rem .5rem; }
+}

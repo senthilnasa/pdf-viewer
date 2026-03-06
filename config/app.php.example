@@ -1,0 +1,52 @@
+<?php
+/**
+ * Application Configuration
+ * PDF Viewer Platform - github.com/senthilnasa/pdf-viewer
+ */
+
+return [
+    // Site Settings
+    'site_name'          => 'PDF Viewer',
+    'base_url'           => 'http://localhost/pdf-viewer', // No trailing slash
+    'timezone'           => 'UTC',
+
+    // Upload Settings
+    'upload_directory'   => __DIR__ . '/../uploads/',
+    'max_upload_size'    => 50 * 1024 * 1024, // 50MB in bytes
+    'allowed_types'      => ['application/pdf'],
+
+    // Google OAuth2
+    'google_oauth_enabled'      => false,
+    'google_oauth_client_id'    => '',
+    'google_oauth_client_secret'=> '',
+    'google_oauth_redirect_uri' => '', // e.g. http://localhost/pdf-viewer/api/auth.php?action=google_callback
+    'google_allowed_domains'    => [], // e.g. ['krea.edu'] — empty = allow all
+
+    // Viewer
+    'enable_public_viewing'     => true,
+    'enable_download'           => true,
+    'enable_flipbook'           => false,
+
+    // Analytics
+    'analytics_enabled'         => true,
+    'ga_measurement_id'         => '', // Google Analytics 4 ID e.g. G-XXXXXXXXXX
+    'cloudflare_analytics_token'=> '',
+
+    // Security
+    'session_lifetime'          => 7200,  // seconds
+    'login_rate_limit'          => 5,     // max attempts
+    'login_rate_window'         => 900,   // 15 minutes in seconds
+    'csrf_token_lifetime'       => 3600,
+
+    // Demo / Test Mode
+    'demo_mode'                 => false,
+    'demo_email'                => 'admin@example.com',
+    'demo_password'             => 'demo123',
+
+    // Share Links
+    'share_link_default_expiry' => 30, // days
+
+    // SEO
+    'meta_title_suffix'         => ' | PDF Viewer',
+    'sitemap_enabled'           => true,
+];

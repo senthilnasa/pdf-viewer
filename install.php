@@ -80,7 +80,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 3) {
             file_put_contents(ROOT . '/config/database.php', $dbConfigContent);
 
             // Update app config base_url and site_name
-            $appConfig = file_get_contents(ROOT . '/config/app.php');
+            $appConfigPath = ROOT . '/config/app.php';
+            if (!file_exists($appConfigPath)) {
+                copy(ROOT . '/config/app.php.example', $appConfigPath);
+            }
+            $appConfig = file_get_contents($appConfigPath);
             $appConfig = preg_replace(
                 "/'base_url'\s*=>\s*'[^']*'/",
                 "'base_url' => " . var_export($baseUrl, true),
@@ -91,7 +95,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 3) {
                 "'site_name' => " . var_export($siteName, true),
                 $appConfig
             );
-            file_put_contents(ROOT . '/config/app.php', $appConfig);
+            file_put_contents($appConfigPath, $appConfig);
 
             $_SESSION['install_done'] = true;
             header('Location: install.php?step=4');

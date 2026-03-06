@@ -10,7 +10,14 @@
 
 function bootstrap(): array
 {
-    $config = require ROOT . '/config/app.php';
+    $appConfig = ROOT . '/config/app.php';
+    if (!file_exists($appConfig)) {
+        $base = rtrim(dirname($_SERVER['SCRIPT_NAME'] ?? ''), '/');
+        $installer = $base . '/install.php';
+        header('Location: ' . $installer);
+        exit;
+    }
+    $config = require $appConfig;
     date_default_timezone_set($config['timezone'] ?? 'UTC');
 
     // Start auth / session

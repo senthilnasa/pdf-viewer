@@ -26,12 +26,6 @@ if (get('export') === 'csv') {
 if (get('export') === 'summary_csv') {
     exportCsv(Analytics::getReportSummary($filters), 'pdf-summary-' . date('Ymd') . '.csv');
 }
-if (get('export') === 'users_csv') {
-    $rows = Database::fetchAll(
-        "SELECT name, email, role, status, created_at, last_login FROM users ORDER BY created_at DESC"
-    );
-    exportCsv($rows, 'users-' . date('Ymd') . '.csv');
-}
 
 $reportData  = Analytics::getReportData($filters);
 $summaryData = Analytics::getReportSummary($filters);
@@ -113,7 +107,6 @@ $printMode = get('print') === '1';
                 <button onclick="window.open('reports.php?<?= http_build_query(array_merge($_GET,['print'=>'1'])) ?>','_blank')" class="btn btn-outline">
                     Print / Save PDF
                 </button>
-                <a href="?<?= http_build_query(array_merge($_GET,['export'=>'users_csv'])) ?>" class="btn btn-outline">Export Users CSV</a>
             </div>
         </div>
 
@@ -155,7 +148,6 @@ $printMode = get('print') === '1';
         <div class="card" style="margin-bottom:1.5rem">
             <div class="card-header">
                 <h3 class="card-title">User Statistics</h3>
-                <a href="?<?= http_build_query(array_merge($_GET,['export'=>'users_csv'])) ?>" class="btn btn-sm btn-outline no-print">Export CSV</a>
             </div>
             <div class="card-body">
                 <div class="user-stats" style="margin-bottom:1.25rem">

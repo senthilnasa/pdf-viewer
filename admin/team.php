@@ -83,6 +83,14 @@ if (isPost()) {
     }
 }
 
+// CSV export
+if (get('export') === 'users_csv') {
+    $rows = Database::fetchAll(
+        "SELECT name, email, role, status, created_at, last_login FROM users ORDER BY created_at DESC"
+    );
+    exportCsv($rows, 'users-' . date('Ymd') . '.csv');
+}
+
 $members = Database::fetchAll(
     'SELECT *, (SELECT COUNT(*) FROM pdf_documents WHERE created_by = users.id) AS pdf_count FROM users ORDER BY created_at DESC'
 );
@@ -105,7 +113,10 @@ $members = Database::fetchAll(
     <div class="admin-content">
         <div class="page-header">
             <div><h1>Team</h1><p class="text-muted"><?= number_format(count($members)) ?> members</p></div>
-            <button class="btn btn-primary" onclick="document.getElementById('inviteModal').classList.add('open')">+ Invite Member</button>
+            <div style="display:flex;gap:.5rem">
+                <a href="?export=users_csv" class="btn btn-outline">Export CSV</a>
+                <button class="btn btn-primary" onclick="document.getElementById('inviteModal').classList.add('open')">+ Invite Member</button>
+            </div>
         </div>
 
         <?php if ($error): ?>

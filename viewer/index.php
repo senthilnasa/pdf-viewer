@@ -233,11 +233,9 @@ $fileSizeHuman = $pdfManager->humanFileSize($pdf['file_size']);
     .stf__parent { perspective: 2000px !important; }
 
     /* Toolbar toggle button */
-    .tool-btn-flipbook { position: relative; }
-    .tool-btn-flipbook::after {
-        content: 'NEW'; position: absolute; top: -4px; right: -4px;
-        background: #4f46e5; color: #fff; font-size: .5rem; font-weight: 700;
-        padding: 1px 3px; border-radius: 3px; letter-spacing: .03em;
+    .tool-btn-flipbook {
+        width: auto !important; padding: 0 .75rem; gap: .4rem;
+        font-size: .8rem; font-weight: 600; white-space: nowrap;
     }
     </style>
 </head>
@@ -453,7 +451,7 @@ $fileSizeHuman = $pdfManager->humanFileSize($pdf['file_size']);
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" width="15" height="15"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7"/></svg>
             </button>
             <!-- Sound toggle -->
-            <button class="fb-icon-btn" id="fbSoundBtn" title="Toggle sound">
+            <button class="fb-icon-btn fb-active" id="fbSoundBtn" title="Toggle sound">
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" width="15" height="15"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072M12 6v12m-3.536-9.536a5 5 0 000 7.072M7 10l5-5 5 5M7 14l5 5 5-5"/></svg>
                 Sound
             </button>
@@ -530,29 +528,49 @@ const VIEWER_CONFIG = {
 
     /* ---------- state ---------- */
     const fb = {
-        ready:       false,
-        instance:    null,
-        totalPages:  0,
-        zoom:        1.0,
-        soundOn:     false,
-        doubleMode:  true,  // double-page spread
-        canvases:    [],    // full-res canvases for each page (for thumbs)
+        ready:         false,
+        instance:      null,
+        totalPages:    0,
+        zoom:          1.0,
+        soundOn:       true,   // on by default
+        doubleMode:    true,   // double-page spread
+        canvases:      [],     // full-res canvases for each page
+        singlePageIdx: 0,      // current page in single-page mode
+        singleFlipTo:  null,   // function set during single-mode init
+        dispW:         0,
+        dispH:         0,
     };
 
-    /* ---------- Audio (paper rustle) ---------- */
+    /* ---------- Audio (page-turn swoosh) ---------- */
     let audioCtx = null;
     function playFlipSound() {
         if (!fb.soundOn) return;
         try {
             if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            const buf = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.18, audioCtx.sampleRate);
-            const data = buf.getChannelData(0);
-            for (let i = 0; i < data.length; i++) {
-                data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / data.length, 3) * 0.25;
+            const sr  = audioCtx.sampleRate;
+            const dur = 0.22;
+            const buf = audioCtx.createBuffer(1, Math.ceil(sr * dur), sr);
+            const d   = buf.getChannelData(0);
+            for (let i = 0; i < d.length; i++) {
+                const t   = i / sr;
+                const env = Math.exp(-t * 18) * Math.sin(Math.PI * t / dur); // bell envelope
+                const noise = (Math.random() * 2 - 1);
+                // low-frequency "whoosh" tone + noise
+                d[i] = (noise * 0.55 + Math.sin(2 * Math.PI * 180 * t) * 0.08) * env * 0.35;
             }
+            // band-pass: keep papery 400-3000 Hz range
+            const filter = audioCtx.createBiquadFilter();
+            filter.type = 'bandpass';
+            filter.frequency.value = 1200;
+            filter.Q.value = 0.7;
+            const gain = audioCtx.createGain();
+            gain.gain.setValueAtTime(1.4, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
             const src = audioCtx.createBufferSource();
             src.buffer = buf;
-            src.connect(audioCtx.destination);
+            src.connect(filter);
+            filter.connect(gain);
+            gain.connect(audioCtx.destination);
             src.start();
         } catch (_) {}
     }
@@ -571,10 +589,22 @@ const VIEWER_CONFIG = {
 
     /* ---------- flip controls ---------- */
     window.fbFlipPrev = function () {
-        if (fb.instance) { fb.instance.flipPrev('bottom'); playFlipSound(); }
+        if (fb.doubleMode) {
+            if (fb.instance) { fb.instance.flipPrev('bottom'); playFlipSound(); }
+        } else {
+            if (fb.singleFlipTo && fb.singlePageIdx > 0) {
+                fb.singleFlipTo(fb.singlePageIdx - 1, 'prev');
+            }
+        }
     };
     window.fbFlipNext = function () {
-        if (fb.instance) { fb.instance.flipNext('bottom'); playFlipSound(); }
+        if (fb.doubleMode) {
+            if (fb.instance) { fb.instance.flipNext('bottom'); playFlipSound(); }
+        } else {
+            if (fb.singleFlipTo && fb.singlePageIdx < fb.totalPages - 1) {
+                fb.singleFlipTo(fb.singlePageIdx + 1, 'next');
+            }
+        }
     };
 
     /* ---------- zoom ---------- */
@@ -613,9 +643,9 @@ const VIEWER_CONFIG = {
 
     /* ---------- layout toggle (single / double) ---------- */
     document.getElementById('fbLayoutBtn').addEventListener('click', async function () {
-        fb.doubleMode = !fb.doubleMode;
-        this.querySelector('span') || (this.lastChild.textContent = fb.doubleMode ? ' Double' : ' Single');
-        this.lastChild.nodeValue = fb.doubleMode ? ' Double' : ' Single';
+        fb.doubleMode    = !fb.doubleMode;
+        fb.singleFlipTo  = null;
+        this.textContent = fb.doubleMode ? ' Double' : ' Single';
         // Reinitialize with new layout
         fb.ready = false;
         document.getElementById('fbBook').innerHTML = '';
@@ -717,50 +747,102 @@ const VIEWER_CONFIG = {
             tDiv.title = `Page ${i}`;
             tDiv.appendChild(tCv);
             tDiv.addEventListener('click', () => {
-                fb.instance && fb.instance.flip(i - 1);
+                if (fb.doubleMode) {
+                    fb.instance && fb.instance.flip(i - 1);
+                } else if (fb.singleFlipTo) {
+                    fb.singleFlipTo(i - 1, i - 1 > fb.singlePageIdx ? 'next' : 'prev');
+                }
             });
             thumbsEl.appendChild(tDiv);
         }
 
-        /* --- init StPageFlip --- */
+        /* --- destroy previous instance --- */
         if (fb.instance) {
             try { fb.instance.destroy(); } catch (_) {}
+            fb.instance = null;
         }
         fb.zoom = 1.0; applyZoom();
+        fb.dispW = dispW; fb.dispH = dispH;
 
-        const pf = new St.PageFlip(bookEl, {
-            width:              dispW,
-            height:             dispH,
-            size:               'fixed',
-            minWidth:           150,
-            maxWidth:           dispW,
-            minHeight:          200,
-            maxHeight:          dispH,
-            drawShadow:         true,
-            flippingTime:       700,
-            usePortrait:        !fb.doubleMode,
-            startZIndex:        0,
-            autoSize:           false,
-            maxShadowOpacity:   0.5,
-            showCover:          true,
-            mobileScrollSupport:true,
-            clickEventForward:  true,
-            useMouseEvents:     true,
-            swipeDistance:      30,
-            showPageCorners:    true,
-            disableFlipByClick: false,
-        });
+        if (fb.doubleMode) {
+            /* ── Double-page mode: StPageFlip ── */
+            const pf = new St.PageFlip(bookEl, {
+                width:               dispW,
+                height:              dispH,
+                size:                'fixed',
+                minWidth:            150,
+                maxWidth:            dispW,
+                minHeight:           200,
+                maxHeight:           dispH,
+                drawShadow:          true,
+                flippingTime:        700,
+                usePortrait:         false,
+                startZIndex:         0,
+                autoSize:            false,
+                maxShadowOpacity:    0.5,
+                showCover:           true,
+                mobileScrollSupport: true,
+                clickEventForward:   true,
+                useMouseEvents:      true,
+                swipeDistance:       30,
+                showPageCorners:     true,
+                disableFlipByClick:  false,
+            });
+            pf.loadFromHTML(bookEl.querySelectorAll('.fb-page'));
+            pf.on('flip', (e) => { updateUI(e.data); playFlipSound(); });
+            fb.instance = pf;
 
-        pf.loadFromHTML(bookEl.querySelectorAll('.fb-page'));
+        } else {
+            /* ── Single-page mode: custom CSS-3D flipper ── */
+            bookEl.innerHTML = '';
+            fb.singlePageIdx = 0;
 
-        pf.on('flip', (e) => {
-            updateUI(e.data);
-            playFlipSound();
-        });
-        pf.on('changeState', () => {});
+            const singleEl = document.createElement('div');
+            singleEl.id = 'fbSinglePage';
+            singleEl.style.cssText = [
+                `width:${dispW}px`, `height:${dispH}px`,
+                'overflow:hidden', 'position:relative',
+                'box-shadow:0 20px 60px rgba(0,0,0,.7)',
+                'transform-style:preserve-3d',
+                'border-radius:2px',
+            ].join(';');
+            bookEl.appendChild(singleEl);
 
-        fb.instance = pf;
-        fb.ready    = true;
+            function renderSinglePage(idx, dir) {
+                fb.singlePageIdx = idx;
+                const cv    = fb.canvases[idx];
+                const cvEl  = document.createElement('canvas');
+                cvEl.width  = dispW; cvEl.height = dispH;
+                cvEl.style.cssText = 'display:block;width:100%;height:100%;';
+                cvEl.getContext('2d').drawImage(cv, 0, 0, dispW, dispH);
+
+                if (dir) {
+                    /* fly in from edge */
+                    const fromX = dir === 'next' ? '60px' : '-60px';
+                    singleEl.style.cssText += `;transition:none;opacity:0;transform:perspective(1400px) translateX(${fromX}) rotateY(${dir === 'next' ? 18 : -18}deg)`;
+                    singleEl.innerHTML = '';
+                    singleEl.appendChild(cvEl);
+                    requestAnimationFrame(() => requestAnimationFrame(() => {
+                        singleEl.style.transition = 'opacity .32s ease, transform .38s cubic-bezier(.22,1,.36,1)';
+                        singleEl.style.opacity    = '1';
+                        singleEl.style.transform  = 'perspective(1400px) translateX(0) rotateY(0deg)';
+                    }));
+                } else {
+                    singleEl.style.transition = 'none';
+                    singleEl.style.opacity    = '1';
+                    singleEl.style.transform  = 'none';
+                    singleEl.innerHTML        = '';
+                    singleEl.appendChild(cvEl);
+                }
+                updateUI(idx);
+                playFlipSound();
+            }
+
+            fb.singleFlipTo = renderSinglePage;
+            renderSinglePage(0, null);
+        }
+
+        fb.ready = true;
 
         /* --- show UI --- */
         loadingEl.style.display  = 'none';

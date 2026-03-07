@@ -20,7 +20,7 @@ return [
     'google_oauth_client_id'    => '',
     'google_oauth_client_secret'=> '',
     'google_oauth_redirect_uri' => '', // e.g. http://localhost/pdf-viewer/api/auth.php?action=google_callback
-    'google_allowed_domains'    => [], // e.g. ['krea.edu'] — empty = allow all
+    'google_allowed_domains'    => [], // e.g. ['senthilnasa.me'] — empty = allow all
 
     // Viewer
     'enable_public_viewing'     => true,

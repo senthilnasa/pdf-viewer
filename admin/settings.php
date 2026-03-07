@@ -253,7 +253,7 @@ $demoCronPhpCmd = 'php ' . ROOT . '/cron.php';
                     </div>
                     <div class="form-group">
                         <label class="form-label">Allowed Email Domains (comma-separated, empty = all)</label>
-                        <input type="text" name="google_allowed_domains" class="form-control" placeholder="krea.edu, example.com" value="<?= e($googleDomains) ?>">
+                        <input type="text" name="google_allowed_domains" class="form-control" placeholder="senthilnasa.me, example.com" value="<?= e($googleDomains) ?>">
                     </div>
                 </div>
             </div>

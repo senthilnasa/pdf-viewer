@@ -32,20 +32,20 @@
 
 ## Features
 
-| Category | What's Included |
-|---|---|
-| **Viewer** | PDF.js renderer · lazy page loading · thumbnails · zoom · rotate · fullscreen · text search · keyboard shortcuts |
-| **Viewer Branding** | Configurable header logo · title · subtitle · colors · footer · per-document or global presets |
-| **Analytics** | Visit tracking · unique IPs · page-level heatmap · Chart.js dashboards · 30/90-day trends |
-| **Auth** | Local login + Google OAuth2 · rate limiting · CSRF protection · password reset · invite system |
-| **Multi-user** | Admin / Editor / Viewer roles · team management |
-| **PDF Management** | Upload · edit · replace file without changing URL · delete · slug management |
-| **Share Links** | Expiry dates · max view count · password-protected tokens |
-| **Reports** | CSV export · date / IP / document filters |
-| **SEO** | Per-document meta title · meta description · OpenGraph · auto `sitemap.xml` |
-| **Integrations** | Google Analytics 4 · Cloudflare Analytics |
-| **Performance** | Gzip · browser caching · lazy rendering · PDO prepared statements · OPcache (Docker) |
-| **Security** | MIME-type file validation · PDO prepared statements · CSRF tokens · rate limiting · uploads directory hardened |
+| Category            | What's Included                                                                                                  |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| **Viewer**          | PDF.js renderer · lazy page loading · thumbnails · zoom · rotate · fullscreen · text search · keyboard shortcuts |
+| **Viewer Branding** | Configurable header logo · title · subtitle · colors · footer · per-document or global presets                   |
+| **Analytics**       | Visit tracking · unique IPs · page-level heatmap · Chart.js dashboards · 30/90-day trends                        |
+| **Auth**            | Local login + Google OAuth2 · rate limiting · CSRF protection · password reset · invite system                   |
+| **Multi-user**      | Admin / Editor / Viewer roles · team management                                                                  |
+| **PDF Management**  | Upload · edit · replace file without changing URL · delete · slug management                                     |
+| **Share Links**     | Expiry dates · max view count · password-protected tokens                                                        |
+| **Reports**         | CSV export · date / IP / document filters                                                                        |
+| **SEO**             | Per-document meta title · meta description · OpenGraph · auto `sitemap.xml`                                      |
+| **Integrations**    | Google Analytics 4 · Cloudflare Analytics                                                                        |
+| **Performance**     | Gzip · browser caching · lazy rendering · PDO prepared statements · OPcache (Docker)                             |
+| **Security**        | MIME-type file validation · PDO prepared statements · CSRF tokens · rate limiting · uploads directory hardened   |
 
 ---
 
@@ -53,9 +53,9 @@
 
 Choose your deployment method:
 
-| I want to… | Go to |
-|---|---|
-| Run locally or on a VPS with Docker | [Deployment Guide A — Docker](#deployment-guide-a--docker) |
+| I want to…                                                | Go to                                                                                         |
+| --------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| Run locally or on a VPS with Docker                       | [Deployment Guide A — Docker](#deployment-guide-a--docker)                                    |
 | Deploy on shared hosting (cPanel, Hostinger, SiteGround…) | [Deployment Guide B — Shared Hosting](#deployment-guide-b--shared-hosting-apache--php--mysql) |
 
 ---
@@ -64,12 +64,12 @@ Choose your deployment method:
 
 ### Prerequisites
 
-| Tool | Minimum version |
-|---|---|
-| Docker Engine | 20.10+ |
+| Tool           | Minimum version                  |
+| -------------- | -------------------------------- |
+| Docker Engine  | 20.10+                           |
 | Docker Compose | v2.0+ (plugin, `docker compose`) |
-| RAM | 512 MB free |
-| Disk | 1 GB free |
+| RAM            | 512 MB free                      |
+| Disk           | 1 GB free                        |
 
 Verify your installation:
 
@@ -124,6 +124,7 @@ docker compose up -d --build
 ```
 
 This starts:
+
 - **`pdfviewer_app`** — PHP 8.2 + Apache on port `APP_PORT` (default `8080`)
 - **`pdfviewer_db`** — MySQL 8.0, schema auto-imported from `database.sql`
 
@@ -147,14 +148,15 @@ http://localhost:8080/install.php
 
 Follow the 4-step wizard:
 
-| Step | What happens |
-|---|---|
-| 1. Welcome | Overview + pre-flight info |
-| 2. Requirements | System check (PHP extensions, writable dirs) |
-| 3. Configure | Enter DB credentials (pre-filled from ENV) + create admin account |
-| 4. Done | Installation complete |
+| Step            | What happens                                                      |
+| --------------- | ----------------------------------------------------------------- |
+| 1. Welcome      | Overview + pre-flight info                                        |
+| 2. Requirements | System check (PHP extensions, writable dirs)                      |
+| 3. Configure    | Enter DB credentials (pre-filled from ENV) + create admin account |
+| 4. Done         | Installation complete                                             |
 
 > **Security:** After installation, remove or restrict `install.php`:
+>
 > ```bash
 > docker compose exec app rm /var/www/html/install.php
 > ```
@@ -283,14 +285,14 @@ docker compose up -d --build
 
 Verify these with your hosting provider's PHP info page:
 
-| Requirement | Minimum |
-|---|---|
-| PHP | 8.0+ |
-| Extensions | `pdo_mysql`, `fileinfo`, `json`, `curl` |
-| MySQL / MariaDB | 5.7+ / 10.3+ |
-| Apache | 2.4+ with `mod_rewrite` |
+| Requirement     | Minimum                                 |
+| --------------- | --------------------------------------- |
+| PHP             | 8.0+                                    |
+| Extensions      | `pdo_mysql`, `fileinfo`, `json`, `curl` |
+| MySQL / MariaDB | 5.7+ / 10.3+                            |
+| Apache          | 2.4+ with `mod_rewrite`                 |
 | `AllowOverride` | Must be `All` (for `.htaccess` to work) |
-| Upload limit | Recommended: 50 MB+ |
+| Upload limit    | Recommended: 50 MB+                     |
 
 > Most shared hosts (cPanel, Hostinger, SiteGround, Namecheap, A2 Hosting) meet all requirements.
 
@@ -314,11 +316,11 @@ git clone https://github.com/senthilnasa/pdf-viewer.git public_html/pdf-viewer
 
 ### Step 2 — Choose Your Document Root
 
-| Scenario | Recommended path |
-|---|---|
-| Subdirectory: `yourdomain.com/pdf-viewer` | Upload to `public_html/pdf-viewer/` |
-| Subdomain: `docs.yourdomain.com` | Upload to `public_html/docs/` (or subdomain root) |
-| Root domain: `yourdomain.com` | Upload directly to `public_html/` |
+| Scenario                                  | Recommended path                                  |
+| ----------------------------------------- | ------------------------------------------------- |
+| Subdirectory: `yourdomain.com/pdf-viewer` | Upload to `public_html/pdf-viewer/`               |
+| Subdomain: `docs.yourdomain.com`          | Upload to `public_html/docs/` (or subdomain root) |
+| Root domain: `yourdomain.com`             | Upload directly to `public_html/`                 |
 
 ---
 
@@ -399,6 +401,7 @@ https://yourdomain.com/pdf-viewer/install.php
 ```
 
 The 4-step wizard will:
+
 1. ✅ Check PHP extensions and writable directories
 2. ✅ Test and create the database connection
 3. ✅ Import the full database schema
@@ -485,6 +488,7 @@ git pull origin main
 ```
 
 **Via FTP:**
+
 1. Download the latest ZIP from GitHub
 2. Upload and overwrite all files **except** `config/app.php` and `config/database.php`
 3. Your uploads, config, and database remain intact
@@ -495,23 +499,23 @@ git pull origin main
 
 ### `config/app.php`
 
-| Key | Default | Description |
-|---|---|---|
-| `site_name` | `'PDF Viewer'` | Site name shown in UI and page titles |
-| `base_url` | `'http://localhost'` | Full base URL, no trailing slash |
-| `timezone` | `'UTC'` | PHP timezone string |
-| `upload_directory` | `uploads/` | Absolute path to uploads folder |
-| `max_upload_size` | `52428800` | Max PDF size in bytes (default 50 MB) |
-| `google_oauth_client_id` | `''` | Google OAuth2 Client ID |
-| `google_oauth_client_secret` | `''` | Google OAuth2 Client Secret |
-| `google_oauth_redirect_uri` | `''` | OAuth callback URL |
-| `google_allowed_domains` | `[]` | Allowed domains e.g. `['krea.edu']` |
-| `enable_public_viewing` | `true` | Allow anonymous PDF viewing |
-| `analytics_enabled` | `true` | Enable built-in visit tracking |
-| `ga_measurement_id` | `''` | Google Analytics 4 ID |
-| `demo_mode` | `false` | Show demo credentials on login page |
-| `login_rate_limit` | `5` | Max failed login attempts |
-| `login_rate_window` | `900` | Rate limit window in seconds (15 min) |
+| Key                          | Default              | Description                               |
+| ---------------------------- | -------------------- | ----------------------------------------- |
+| `site_name`                  | `'PDF Viewer'`       | Site name shown in UI and page titles     |
+| `base_url`                   | `'http://localhost'` | Full base URL, no trailing slash          |
+| `timezone`                   | `'UTC'`              | PHP timezone string                       |
+| `upload_directory`           | `uploads/`           | Absolute path to uploads folder           |
+| `max_upload_size`            | `52428800`           | Max PDF size in bytes (default 50 MB)     |
+| `google_oauth_client_id`     | `''`                 | Google OAuth2 Client ID                   |
+| `google_oauth_client_secret` | `''`                 | Google OAuth2 Client Secret               |
+| `google_oauth_redirect_uri`  | `''`                 | OAuth callback URL                        |
+| `google_allowed_domains`     | `[]`                 | Allowed domains e.g. `['senthilnasa.me']` |
+| `enable_public_viewing`      | `true`               | Allow anonymous PDF viewing               |
+| `analytics_enabled`          | `true`               | Enable built-in visit tracking            |
+| `ga_measurement_id`          | `''`                 | Google Analytics 4 ID                     |
+| `demo_mode`                  | `false`              | Show demo credentials on login page       |
+| `login_rate_limit`           | `5`                  | Max failed login attempts                 |
+| `login_rate_window`          | `900`                | Rate limit window in seconds (15 min)     |
 
 ### Database Settings (Admin → Settings)
 
@@ -521,34 +525,34 @@ All settings are also manageable through the admin UI and stored in the `setting
 
 ## URL Structure
 
-| URL | Page |
-|---|---|
-| `/` | Public document library |
-| `/pdf/{slug}` | PDF viewer |
-| `/pdf/{slug}?token=abc` | Share link access |
-| `/admin/` | Dashboard |
-| `/admin/pdfs.php` | PDF manager (upload, edit, replace, share) |
-| `/admin/analytics.php` | Analytics with charts |
-| `/admin/reports.php` | CSV reports |
-| `/admin/team.php` | User & role management |
-| `/admin/settings.php` | Application settings |
-| `/admin/viewer-style.php` | **Header & Footer Manager** |
-| `/sitemap.xml` | Auto-generated sitemap |
+| URL                       | Page                                       |
+| ------------------------- | ------------------------------------------ |
+| `/`                       | Public document library                    |
+| `/pdf/{slug}`             | PDF viewer                                 |
+| `/pdf/{slug}?token=abc`   | Share link access                          |
+| `/admin/`                 | Dashboard                                  |
+| `/admin/pdfs.php`         | PDF manager (upload, edit, replace, share) |
+| `/admin/analytics.php`    | Analytics with charts                      |
+| `/admin/reports.php`      | CSV reports                                |
+| `/admin/team.php`         | User & role management                     |
+| `/admin/settings.php`     | Application settings                       |
+| `/admin/viewer-style.php` | **Header & Footer Manager**                |
+| `/sitemap.xml`            | Auto-generated sitemap                     |
 
 ---
 
 ## User Roles
 
-| Permission | Admin | Editor | Viewer |
-|---|:---:|:---:|:---:|
-| View admin dashboard | ✓ | ✓ | ✓ |
-| Upload & manage PDFs | ✓ | ✓ | — |
-| View analytics | ✓ | ✓ | ✓ |
-| Export reports | ✓ | ✓ | ✓ |
-| Delete PDFs | ✓ | — | — |
-| Manage team | ✓ | — | — |
-| Change settings | ✓ | — | — |
-| Viewer style manager | ✓ | — | — |
+| Permission           | Admin | Editor | Viewer |
+| -------------------- | :---: | :----: | :----: |
+| View admin dashboard |   ✓   |   ✓    |   ✓    |
+| Upload & manage PDFs |   ✓   |   ✓    |   —    |
+| View analytics       |   ✓   |   ✓    |   ✓    |
+| Export reports       |   ✓   |   ✓    |   ✓    |
+| Delete PDFs          |   ✓   |   —    |   —    |
+| Manage team          |   ✓   |   —    |   —    |
+| Change settings      |   ✓   |   —    |   —    |
+| Viewer style manager |   ✓   |   —    |   —    |
 
 ---
 
@@ -559,6 +563,7 @@ Located at **Admin → Viewer Style** (`/admin/viewer-style.php`).
 ### What You Can Configure
 
 **Header:**
+
 - Show / hide the entire header bar
 - Upload a logo image (PNG, JPG, SVG, WebP)
 - Set title and subtitle text
@@ -566,12 +571,14 @@ Located at **Admin → Viewer Style** (`/admin/viewer-style.php`).
 - Toggle: file info (page count, file size), Share button, Download button
 
 **Footer:**
+
 - Show / hide the footer bar
 - Set left-side text (copyright, organisation name)
 - Pick background and text colors
 - Toggle page number display
 
 **Canvas Theme:**
+
 - **Dark** — dark grey background (default, best for reading)
 - **Light** — white/light grey background
 - **Auto** — follows the user's OS dark/light preference
@@ -601,7 +608,7 @@ Live preview updates instantly as you change colors, so you can see the result b
    - Enable Google Sign-In ✓
    - Paste Client ID and Client Secret
    - Set the Redirect URI to match what you entered in Google Console
-   - Optionally restrict to email domains (e.g. `krea.edu`)
+   - Optionally restrict to email domains (e.g. `senthilnasa.me`)
 
 ---
 
@@ -610,6 +617,7 @@ Live preview updates instantly as you change colors, so you can see the result b
 ### Built-in Analytics
 
 Every document view logs:
+
 - Visitor IP address
 - User agent
 - Referrer URL
@@ -629,11 +637,13 @@ Every page scroll logs page number + timestamp for the heatmap.
 **Admin → Reports → Export CSV**
 
 Filters:
+
 - Date range
 - Specific document
 - Visitor IP
 
 Available exports:
+
 - **Summary CSV** — one row per document with totals
 - **Detail CSV** — one row per visit with IP, user agent, referrer, time
 
@@ -704,6 +714,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 4. Open a pull request
 
 Please:
+
 - Use PHP 8.0+ syntax only
 - Keep all SQL queries using PDO prepared statements
 - Add CSRF protection to any new POST forms

@@ -32,6 +32,19 @@ function bootstrap(): array
     $auth = new Auth($config);
     $auth->startSession();
 
+    // Demo mode pseudo-cron: auto-reset when interval elapses
+    if (!defined('SKIP_DEMO_CRON')) {
+        try {
+            if (getSetting('demo_mode', false)) {
+                $interval  = (int)getSetting('demo_reset_interval', 30) * 60; // seconds
+                $lastReset = (int)getSetting('demo_last_reset_at', 0);
+                if ($interval > 0 && (time() - $lastReset) >= $interval) {
+                    demoResetSettings();
+                }
+            }
+        } catch (Throwable $_) {}
+    }
+
     return $config;
 }
 
@@ -147,6 +160,62 @@ function castSetting(string $value, string $type): mixed
         'json'    => json_decode($value, true),
         default   => $value,
     };
+}
+
+// -------------------------------------------------------------------------
+// Demo Mode helpers
+// -------------------------------------------------------------------------
+
+/**
+ * Save all current non-demo settings as the baseline snapshot.
+ * Called when demo mode is first activated or admin clicks "Take Snapshot".
+ */
+function demoTakeSnapshot(): void
+{
+    try {
+        $rows     = Database::fetchAll('SELECT `key`, `value`, `type` FROM settings WHERE `key` NOT LIKE "demo\_%"');
+        $snapshot = [];
+        foreach ($rows as $row) {
+            $snapshot[$row['key']] = ['value' => $row['value'], 'type' => $row['type']];
+        }
+        $json = json_encode($snapshot);
+        Database::query(
+            'INSERT INTO settings (`key`, `value`, `type`) VALUES ("demo_snapshot", ?, "json")
+             ON DUPLICATE KEY UPDATE `value` = ?, `type` = "json"',
+            [$json, $json]
+        );
+    } catch (Throwable $_) {}
+}
+
+/**
+ * Restore all settings to the demo snapshot.
+ * Called by pseudo-cron on page load or by the cron endpoint.
+ */
+function demoResetSettings(): void
+{
+    try {
+        $snapshotJson = Database::fetchScalar('SELECT value FROM settings WHERE `key` = "demo_snapshot"');
+        if (!$snapshotJson) return;
+
+        $snapshot = json_decode($snapshotJson, true);
+        if (!is_array($snapshot)) return;
+
+        foreach ($snapshot as $key => $entry) {
+            Database::query(
+                'INSERT INTO settings (`key`, `value`, `type`) VALUES (?, ?, ?)
+                 ON DUPLICATE KEY UPDATE `value` = ?, `type` = ?',
+                [$key, $entry['value'], $entry['type'], $entry['value'], $entry['type']]
+            );
+        }
+
+        // Record reset time (direct query to avoid cache issues)
+        $ts = (string)time();
+        Database::query(
+            'INSERT INTO settings (`key`, `value`, `type`) VALUES ("demo_last_reset_at", ?, "integer")
+             ON DUPLICATE KEY UPDATE `value` = ?, `type` = "integer"',
+            [$ts, $ts]
+        );
+    } catch (Throwable $_) {}
 }
 
 // -------------------------------------------------------------------------

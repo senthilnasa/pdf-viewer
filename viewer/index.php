@@ -18,17 +18,56 @@ $token = get('token', '');
 $pdf = $pdfManager->getBySlug($slug);
 
 if (!$pdf) {
+    $errorMessage = $slug
+        ? 'The document "' . htmlspecialchars($slug) . '" could not be found. It may have been removed or the link is incorrect.'
+        : 'No document was specified in the URL.';
     http_response_code(404);
-    die('Document not found.');
+    include ROOT . '/errors/404.php';
+    exit;
 }
 
 // Share link token flow
 $shareLink = null;
 if ($token) {
-    $shareLink = $pdfManager->validateShareLink($token);
+    // Check if this token exists and requires a password before full validation
+    $rawLink = Database::fetchOne(
+        'SELECT sl.password, p.slug FROM share_links sl JOIN pdf_documents p ON p.id = sl.pdf_id WHERE sl.token = ?',
+        [$token]
+    );
+
+    $sharePass      = trim(get('share_pass', post('share_pass', '')));
+    $sharePassError = '';
+
+    if ($rawLink && $rawLink['password']) {
+        // Password-protected link: show form if password not submitted yet
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST' && !isset($_GET['share_pass'])) {
+            // Show password entry form
+            $siteName = getSetting('site_name', $config['site_name'] ?? 'PDF Viewer');
+            include ROOT . '/viewer/partials/share-password-form.php';
+            exit;
+        }
+
+        // Validate with password
+        $shareLink = $pdfManager->validateShareLink($token, $sharePass);
+
+        if (!$shareLink) {
+            // Wrong password or expired/limit reached — re-show form with error
+            $siteName       = getSetting('site_name', $config['site_name'] ?? 'PDF Viewer');
+            $sharePassError = 'Incorrect password. Please try again.';
+            include ROOT . '/viewer/partials/share-password-form.php';
+            exit;
+        }
+    } else {
+        // No password required — normal validation
+        $shareLink = $pdfManager->validateShareLink($token);
+    }
+
     if (!$shareLink || $shareLink['slug'] !== $slug) {
+        // Invalid / expired / limit reached — styled error page
+        $siteName = getSetting('site_name', $config['site_name'] ?? 'PDF Viewer');
         http_response_code(403);
-        die('This share link is invalid, expired, or has reached its view limit.');
+        include ROOT . '/viewer/partials/share-error.php';
+        exit;
     }
 }
 

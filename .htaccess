@@ -80,7 +80,8 @@ ErrorDocument 500 /errors/404.php
     # Protect uploads — only allow serving PDFs through viewer
     RewriteRule ^uploads/.*\.php$ - [F,L]
 
-    # Block direct browsing of error pages (they are only served by Apache internally)
+    # Block direct browsing of error pages (skip for internal Apache error redirects)
+    RewriteCond %{ENV:REDIRECT_STATUS} ^$
     RewriteRule ^errors/ - [F,L]
 
     # ----------------------------------------------------------

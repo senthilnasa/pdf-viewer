@@ -55,6 +55,7 @@ $weekdays = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <?php require ROOT . '/admin/partials/head-meta.php'; ?>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Analytics — <?= e($siteName) ?></title>
     <link rel="stylesheet" href="../assets/css/admin.css">

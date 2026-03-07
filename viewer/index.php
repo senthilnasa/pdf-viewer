@@ -92,6 +92,7 @@ $fileSizeHuman = $pdfManager->humanFileSize($pdf['file_size']);
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <?php require ROOT . '/admin/partials/head-meta.php'; ?>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><?= e($metaTitle) ?></title>
     <meta name="description" content="<?= e($metaDesc) ?>">

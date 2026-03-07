@@ -54,7 +54,7 @@ async function loadPDF() {
 
         loadingTask.onProgress = (data) => {
             if (data.total) {
-                const pct = Math.round((data.loaded / data.total) * 100);
+                const pct = Math.min(99, Math.round((data.loaded / data.total) * 100));
                 setLoading(true, `Loading… ${pct}%`);
             }
         };
@@ -68,20 +68,22 @@ async function loadPDF() {
         if (pdfPageCountEl) pdfPageCountEl.textContent = `${totalPages} pages`;
         if (footerPage) footerPage.textContent = `Page 1 of ${totalPages}`;
 
-        // Build empty page placeholders
+        // Build placeholders then render first page before hiding spinner
         buildPlaceholders();
+        try { await renderPage(1); } catch (_) {}
+        setLoading(false);
 
-        // Render first 3 pages
-        await renderPage(1);
+        // Render next pages in background
         renderPage(2);
         renderPage(3);
-
-        // Build thumbnails
         renderThumbnails();
 
-        setLoading(false);
+        // Auto-open flipbook if configured as default
+        if (cfg.defaultView === 'flipbook' && typeof openFlipbook === 'function') {
+            openFlipbook();
+        }
     } catch (err) {
-        setLoading(true, 'Failed to load PDF.');
+        setLoading(false);
         console.error('PDF load error:', err);
     }
 }

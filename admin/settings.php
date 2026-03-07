@@ -22,6 +22,7 @@ if (isPost()) {
         'analytics_enabled'    => ['boolean', post('analytics_enabled', '0')],
         'enable_download'      => ['boolean', post('enable_download', '0')],
         'enable_flipbook'      => ['boolean', post('enable_flipbook', '0')],
+        'default_view'         => ['string',  in_array(post('default_view'), ['pdf','flipbook']) ? post('default_view') : 'pdf'],
         'ga_measurement_id'    => ['string',  post('ga_measurement_id')],
         'cloudflare_token'     => ['string',  post('cloudflare_token')],
         'google_oauth_enabled'    => ['boolean', post('google_oauth_enabled', '0')],
@@ -58,6 +59,7 @@ $settings = [
     'analytics_enabled'    => getSetting('analytics_enabled', true),
     'enable_download'      => getSetting('enable_download', true),
     'enable_flipbook'      => getSetting('enable_flipbook', false),
+    'default_view'         => getSetting('default_view', 'pdf'),
     'ga_measurement_id'    => getSetting('ga_measurement_id', ''),
     'cloudflare_token'     => getSetting('cloudflare_token', ''),
     'google_oauth_enabled'   => getSetting('google_oauth_enabled', false),
@@ -133,6 +135,28 @@ $googleDomains = implode(', ', (array)($settings['google_allowed_domains'] ?? []
                             <input type="checkbox" name="enable_flipbook" value="1" <?= $settings['enable_flipbook']?'checked':'' ?>>
                             <span>Enable Flipbook Mode</span>
                         </label>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Default View Mode</label>
+                        <div style="display:flex;gap:1rem;margin-top:.35rem">
+                            <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer">
+                                <input type="radio" name="default_view" value="pdf"
+                                       <?= $settings['default_view']==='pdf'?'checked':'' ?>>
+                                <span>
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" width="15" height="15" style="vertical-align:middle"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                                    PDF Viewer (default)
+                                </span>
+                            </label>
+                            <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer">
+                                <input type="radio" name="default_view" value="flipbook"
+                                       <?= $settings['default_view']==='flipbook'?'checked':'' ?>>
+                                <span>
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" width="15" height="15" style="vertical-align:middle"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.746 0 3.332.477 4.5 1.253v13C19.832 18.477 18.246 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/></svg>
+                                    Flipbook (auto-open on load)
+                                </span>
+                            </label>
+                        </div>
+                        <small class="text-muted" style="margin-top:.35rem;display:block">Requires Flipbook Mode to be enabled for the Flipbook option to take effect.</small>
                     </div>
                 </div>
             </div>

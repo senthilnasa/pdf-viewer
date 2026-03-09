@@ -104,7 +104,7 @@ $prefs = array_merge([
     'header_subtitle' => '',
     'header_bg'       => '#1e293b',
     'header_color'    => '#ffffff',
-    'footer_text'     => getSetting('site_name', $config['site_name']),
+    'footer_text'     => getSetting('site_name', $config['site_name']) . ' · Powered by PDF Viewer',
     'footer_bg'       => '#f1f5f9',
     'footer_color'    => '#64748b',
     'show_page_num'   => true,
@@ -459,7 +459,17 @@ $fileSizeHuman = $pdfManager->humanFileSize($pdf['file_size']);
 <?php if ($prefs['show_footer']): ?>
 <footer class="viewer-footer" style="background:<?= e($prefs['footer_bg']) ?>;color:<?= e($prefs['footer_color']) ?>">
     <div class="viewer-footer-left">
-        <?= e($prefs['footer_text']) ?>
+        <?php
+        $footerText = $prefs['footer_text'];
+        // Render "Powered by PDF Viewer" as a clickable link
+        $footerHtml = e($footerText);
+        $footerHtml = preg_replace(
+            '/Powered by PDF Viewer/i',
+            'Powered by <a href="https://github.com/senthilnasa/pdf-viewer" target="_blank" rel="noopener" style="color:inherit;opacity:.75;text-decoration:underline;text-underline-offset:2px">PDF Viewer</a>',
+            $footerHtml
+        );
+        echo $footerHtml;
+        ?>
     </div>
     <div class="viewer-footer-center">
         <?php if ($prefs['show_page_num']): ?>

@@ -38,7 +38,7 @@ $defaultPrefs = [
     'header_subtitle' => '',
     'header_bg'       => '#1e293b',
     'header_color'    => '#ffffff',
-    'footer_text'     => $siteName,
+    'footer_text'     => $siteName . ' · Powered by PDF Viewer',
     'footer_bg'       => '#f1f5f9',
     'footer_color'    => '#64748b',
     'show_page_num'   => true,
@@ -62,6 +62,7 @@ $branding = [
 // ── POST handling ────────────────────────────────────────────────────────────
 if (isPost()) {
     verifyCsrf();
+    $isAjax     = strtolower($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') === 'xmlhttprequest';
     $postAction = post('_tab', 'header');
 
     /* ---------- Header / Footer tab ---------- */
@@ -164,6 +165,12 @@ if (isPost()) {
         }
         $activeTab = 'branding';
     }
+
+    if ($isAjax) {
+        header('Content-Type: application/json');
+        echo json_encode(['success' => !$error, 'message' => $error ?: $success, 'reload' => !$error]);
+        exit;
+    }
 }
 ?>
 <!DOCTYPE html>
@@ -174,6 +181,7 @@ if (isPost()) {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Branding &amp; Viewer Style — <?= e($siteName) ?></title>
     <link rel="stylesheet" href="../assets/css/admin.css">
+    <script src="../assets/js/admin-ajax.js" defer></script>
     <style>
         /* ── Tabs ── */
         .tab-nav {
@@ -354,7 +362,7 @@ if (isPost()) {
                 </div>
             </div>
 
-            <form method="POST" enctype="multipart/form-data" style="max-width:760px">
+            <form method="POST" enctype="multipart/form-data" style="max-width:760px" data-ajax>
                 <?= csrfField() ?>
                 <input type="hidden" name="_tab" value="header">
                 <?php if ($selectedId): ?><input type="hidden" name="pdf_id" value="<?= $selectedId ?>"><?php endif; ?>
@@ -504,7 +512,7 @@ if (isPost()) {
                 </div>
             </div>
 
-            <form method="POST" enctype="multipart/form-data" style="max-width:760px">
+            <form method="POST" enctype="multipart/form-data" style="max-width:760px" data-ajax>
                 <?= csrfField() ?>
                 <input type="hidden" name="_tab" value="footer">
                 <?php if ($selectedId): ?><input type="hidden" name="pdf_id" value="<?= $selectedId ?>"><?php endif; ?>
@@ -587,7 +595,7 @@ if (isPost()) {
         <!-- TAB: BRANDING & ICONS                                     -->
         <!-- ═══════════════════════════════════════════════════════════ -->
         <div class="tab-panel <?= $activeTab==='branding' ? 'active' : '' ?>" id="panel-branding">
-            <form method="POST" enctype="multipart/form-data" style="max-width:760px">
+            <form method="POST" enctype="multipart/form-data" style="max-width:760px" data-ajax>
                 <?= csrfField() ?>
                 <input type="hidden" name="_tab" value="branding">
 

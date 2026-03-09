@@ -24,6 +24,7 @@ $success = '';
 // ------------------------------------------------------------------
 if (isPost()) {
     verifyCsrf();
+    $isAjax     = strtolower($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') === 'xmlhttprequest';
     $postAction = post('_action');
 
     // Upload new PDF
@@ -111,14 +112,18 @@ if (isPost()) {
     }
 
     // Create share link
+    $shareToken = null;
+    $shareUrl   = null;
     if ($postAction === 'create_share' && $id) {
         $opts = [
             'expires_days' => (int)post('expires_days', 0) ?: null,
             'max_views'    => (int)post('max_views', 0) ?: null,
             'password'     => post('link_password') ?: null,
         ];
-        $token = $pdfManager->createShareLink($id, $user['id'], array_filter($opts, fn($v) => $v !== null));
-        $success = 'Share link created! Token: ' . $token;
+        $pdf_for_share = $pdfManager->getById($id);
+        $shareToken    = $pdfManager->createShareLink($id, $user['id'], array_filter($opts, fn($v) => $v !== null));
+        $shareUrl      = $config['base_url'] . '/pdf/' . ($pdf_for_share['slug'] ?? '') . '?token=' . $shareToken;
+        $success = 'Share link created!';
     }
 
     // Delete share link
@@ -126,6 +131,24 @@ if (isPost()) {
         $linkId = (int)post('link_id');
         $pdfManager->deleteShareLink($linkId);
         $success = 'Share link removed.';
+    }
+
+    if ($isAjax) {
+        header('Content-Type: application/json');
+        $resp = ['success' => !$error, 'message' => $error ?: $success];
+        if (!$error) {
+            if ($shareToken) {
+                $resp['shareToken'] = $shareToken;
+                $resp['shareUrl']   = $shareUrl;
+                $resp['reload']     = true;
+            } elseif (in_array($postAction, ['upload', 'update'])) {
+                $resp['redirect'] = 'pdfs.php';
+            } else {
+                $resp['reload'] = true;
+            }
+        }
+        echo json_encode($resp);
+        exit;
     }
 }
 
@@ -149,6 +172,7 @@ $shareLinks = ($action === 'share' && $pdf) ? $pdfManager->getShareLinks($id) : 
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PDF Manager — <?= e($siteName) ?></title>
     <link rel="stylesheet" href="../assets/css/admin.css">
+    <script src="../assets/js/admin-ajax.js" defer></script>
 </head>
 <body class="admin-layout">
 
@@ -202,7 +226,7 @@ $shareLinks = ($action === 'share' && $pdf) ? $pdfManager->getShareLinks($id) : 
                         <a href="?action=share&id=<?= $doc['id'] ?>" class="btn btn-xs btn-outline">Share</a>
                         <a href="analytics.php?pdf_id=<?= $doc['id'] ?>" class="btn btn-xs btn-outline">Stats</a>
                         <?php if ($user['role'] === 'admin'): ?>
-                        <form method="POST" style="display:inline" onsubmit="return confirm('Delete this PDF permanently?')">
+                        <form method="POST" style="display:inline" data-ajax onsubmit="return confirm('Delete this PDF permanently?')">
                             <?= csrfField() ?>
                             <input type="hidden" name="_action" value="delete">
                             <input type="hidden" name="id" value="<?= $doc['id'] ?>">
@@ -226,7 +250,7 @@ $shareLinks = ($action === 'share' && $pdf) ? $pdfManager->getShareLinks($id) : 
     </div>
     <div class="card" style="max-width:700px">
         <div class="card-body">
-            <form method="POST" enctype="multipart/form-data">
+            <form method="POST" enctype="multipart/form-data" data-ajax>
                 <?= csrfField() ?>
                 <input type="hidden" name="_action" value="upload">
 
@@ -290,7 +314,7 @@ $shareLinks = ($action === 'share' && $pdf) ? $pdfManager->getShareLinks($id) : 
     </div>
     <div class="card" style="max-width:700px">
         <div class="card-body">
-            <form method="POST" action="?action=edit&id=<?= $id ?>" enctype="multipart/form-data">
+            <form method="POST" action="?action=edit&id=<?= $id ?>" enctype="multipart/form-data" data-ajax>
                 <?= csrfField() ?>
                 <input type="hidden" name="_action" value="update">
                 <input type="hidden" name="id" value="<?= $id ?>">
@@ -366,7 +390,7 @@ $shareLinks = ($action === 'share' && $pdf) ? $pdfManager->getShareLinks($id) : 
         <div class="card">
             <div class="card-header"><h3 class="card-title">Create Share Link</h3></div>
             <div class="card-body">
-                <form method="POST" action="?action=share&id=<?= $id ?>">
+                <form method="POST" action="?action=share&id=<?= $id ?>" data-ajax>
                     <?= csrfField() ?>
                     <input type="hidden" name="_action" value="create_share">
                     <input type="hidden" name="id" value="<?= $id ?>">
@@ -402,7 +426,7 @@ $shareLinks = ($action === 'share' && $pdf) ? $pdfManager->getShareLinks($id) : 
                         <td><?= $link['max_views'] ?? '∞' ?></td>
                         <td><?= $link['expires_at'] ? formatDate($link['expires_at']) : 'Never' ?></td>
                         <td>
-                            <form method="POST" action="?action=share&id=<?= $id ?>" onsubmit="return confirm('Delete link?')">
+                            <form method="POST" action="?action=share&id=<?= $id ?>" data-ajax onsubmit="return confirm('Delete link?')">
                                 <?= csrfField() ?>
                                 <input type="hidden" name="_action" value="delete_share">
                                 <input type="hidden" name="link_id" value="<?= $link['id'] ?>">

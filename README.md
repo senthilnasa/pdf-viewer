@@ -23,6 +23,7 @@
 - [Viewer Header & Footer Manager](#viewer-header--footer-manager)
 - [Google OAuth2 Setup](#google-oauth2-setup)
 - [Analytics & Reports](#analytics--reports)
+- [Demo / Test Mode & Cron Jobs](#demo--test-mode--cron-jobs)
 - [Security Notes](#security-notes)
 - [Troubleshooting](#troubleshooting)
 - [Contributing](#contributing)
@@ -646,6 +647,66 @@ Available exports:
 
 - **Summary CSV** — one row per document with totals
 - **Detail CSV** — one row per visit with IP, user agent, referrer, time
+
+---
+
+## Demo / Test Mode & Cron Jobs
+
+### Demo Mode
+
+Enable **Demo Mode** in **Admin → Settings → Demo / Test Mode** to allow anyone to explore the admin panel without permanently changing anything.
+
+| Feature | Detail |
+|---|---|
+| Snapshot | Settings are saved as a baseline at activation time |
+| Auto-reset | Settings restore to snapshot on a configurable interval (5 min – 24 h) |
+| Pseudo-cron | Reset fires automatically on any page load when interval elapses |
+| Server cron | Optional — for more precise timing when traffic is low |
+| Credentials | Demo login credentials shown on the login page (set in `config/app.php`) |
+
+### `cron.php` — Scheduled Task Runner
+
+A dedicated cron script is located at the project root: **`cron.php`**
+
+It handles all scheduled tasks (currently: demo reset). It works both via **PHP CLI** and **HTTP**.
+
+#### HTTP call (with token)
+
+```
+GET /cron.php?token=YOUR_CRON_TOKEN
+GET /cron.php?token=YOUR_CRON_TOKEN&force=1   # bypass interval check
+```
+
+Returns JSON:
+```json
+{
+  "success": true,
+  "message": "Settings reset to demo snapshot.",
+  "ran_at": "2025-03-07 14:00:00",
+  "tasks": [
+    { "task": "demo_reset", "status": "ok", "message": "Settings reset to demo snapshot." }
+  ]
+}
+```
+
+#### Server crontab — HTTP (every 60 minutes)
+
+```cron
+0 * * * * wget -qO- "https://yourdomain.com/cron.php?token=YOUR_TOKEN" > /dev/null 2>&1
+```
+
+#### Server crontab — PHP CLI (every 60 minutes, with log)
+
+```cron
+0 * * * * php /var/www/html/cron.php >> /var/log/pdfviewer-cron.log 2>&1
+```
+
+#### Finding your cron token
+
+Go to **Admin → Settings → Demo / Test Mode → Server Cron Setup**.
+The full ready-to-paste crontab commands are shown there with your actual token embedded.
+
+> **Note:** If you don't have server cron access (shared hosting), the built-in **pseudo-cron** fires automatically on every page load — no configuration needed.
 
 ---
 

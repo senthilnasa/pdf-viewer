@@ -14,8 +14,10 @@ $siteName = getSetting('site_name', $config['site_name']);
 $error    = '';
 $success  = '';
 
+$_inviteUrl = null;
 if (isPost()) {
     verifyCsrf();
+    $isAjax     = strtolower($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') === 'xmlhttprequest';
     $postAction = post('_action');
 
     if ($postAction === 'invite') {
@@ -37,8 +39,8 @@ if (isPost()) {
                     'INSERT INTO users (name, email, role, status, invite_token, auth_provider) VALUES (?, ?, ?, ?, ?, ?)',
                     [$name ?: $email, $email, $role, 'invited', $token, 'local']
                 );
-                $inviteUrl = $config['base_url'] . '/admin/accept-invite.php?token=' . $token;
-                $success = "User invited! Share this link with them: <br><code>{$inviteUrl}</code>";
+                $_inviteUrl = $config['base_url'] . '/admin/accept-invite.php?token=' . $token;
+                $success    = 'User invited! Share the invite link with them.';
             }
         }
     }
@@ -81,6 +83,17 @@ if (isPost()) {
             $success = 'User deleted.';
         }
     }
+
+    if ($isAjax) {
+        header('Content-Type: application/json');
+        $resp = ['success' => !$error, 'message' => $error ?: $success, 'reload' => !$error];
+        if ($_inviteUrl) {
+            $resp['inviteUrl'] = $_inviteUrl;
+            $resp['reload']    = false; // modal shows URL, reload after dismiss
+        }
+        echo json_encode($resp);
+        exit;
+    }
 }
 
 // CSV export
@@ -103,6 +116,7 @@ $members = Database::fetchAll(
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Team — <?= e($siteName) ?></title>
     <link rel="stylesheet" href="../assets/css/admin.css">
+    <script src="../assets/js/admin-ajax.js" defer></script>
 </head>
 <body class="admin-layout">
 
@@ -143,7 +157,7 @@ $members = Database::fetchAll(
                         <td><?= e($member['email']) ?></td>
                         <td>
                             <?php if ($member['id'] !== $user['id']): ?>
-                            <form method="POST" style="display:inline-flex;gap:.25rem">
+                            <form method="POST" style="display:inline-flex;gap:.25rem" data-ajax>
                                 <?= csrfField() ?>
                                 <input type="hidden" name="_action" value="update_role">
                                 <input type="hidden" name="member_id" value="<?= $member['id'] ?>">
@@ -163,21 +177,21 @@ $members = Database::fetchAll(
                         <td>
                             <?php if ($member['id'] !== $user['id']): ?>
                             <?php if ($member['status'] === 'active'): ?>
-                            <form method="POST" style="display:inline">
+                            <form method="POST" style="display:inline" data-ajax>
                                 <?= csrfField() ?>
                                 <input type="hidden" name="_action" value="deactivate">
                                 <input type="hidden" name="member_id" value="<?= $member['id'] ?>">
                                 <button type="submit" class="btn btn-xs btn-warning">Deactivate</button>
                             </form>
                             <?php else: ?>
-                            <form method="POST" style="display:inline">
+                            <form method="POST" style="display:inline" data-ajax>
                                 <?= csrfField() ?>
                                 <input type="hidden" name="_action" value="activate">
                                 <input type="hidden" name="member_id" value="<?= $member['id'] ?>">
                                 <button type="submit" class="btn btn-xs btn-outline">Activate</button>
                             </form>
                             <?php endif; ?>
-                            <form method="POST" style="display:inline" onsubmit="return confirm('Delete this user?')">
+                            <form method="POST" style="display:inline" data-ajax onsubmit="return confirm('Delete this user?')">
                                 <?= csrfField() ?>
                                 <input type="hidden" name="_action" value="delete">
                                 <input type="hidden" name="member_id" value="<?= $member['id'] ?>">
@@ -204,7 +218,7 @@ $members = Database::fetchAll(
             <h3>Invite Team Member</h3>
             <button class="modal-close" onclick="document.getElementById('inviteModal').classList.remove('open')">&times;</button>
         </div>
-        <form method="POST">
+        <form method="POST" data-ajax>
             <?= csrfField() ?>
             <input type="hidden" name="_action" value="invite">
             <div class="modal-body">

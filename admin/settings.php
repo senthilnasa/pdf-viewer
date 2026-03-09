@@ -15,6 +15,7 @@ $success  = '';
 
 if (isPost()) {
     verifyCsrf();
+    $isAjax = strtolower($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') === 'xmlhttprequest';
 
     $action = post('_action', 'save');
 
@@ -83,6 +84,12 @@ if (isPost()) {
             $success = 'Settings saved.';
         }
     }
+
+    if ($isAjax) {
+        header('Content-Type: application/json');
+        echo json_encode(['success' => !$error, 'message' => $error ?: $success, 'reload' => !$error]);
+        exit;
+    }
 }
 
 // Load current settings
@@ -125,6 +132,7 @@ $demoCronPhpCmd = 'php ' . ROOT . '/cron.php';
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Settings — <?= e($siteName) ?></title>
     <link rel="stylesheet" href="../assets/css/admin.css">
+    <script src="../assets/js/admin-ajax.js" defer></script>
 </head>
 <body class="admin-layout">
 
@@ -141,7 +149,7 @@ $demoCronPhpCmd = 'php ' . ROOT . '/cron.php';
         <?php if ($error): ?><div class="alert alert-error"><?= e($error) ?></div><?php endif; ?>
         <?php if ($success): ?><div class="alert alert-success"><?= e($success) ?></div><?php endif; ?>
 
-        <form method="POST" style="max-width:700px">
+        <form method="POST" style="max-width:700px" data-ajax>
             <?= csrfField() ?>
 
             <!-- Site Settings -->

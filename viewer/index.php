@@ -274,8 +274,26 @@ $fileSizeHuman = $pdfManager->humanFileSize($pdf['file_size']);
 
     /* Toolbar toggle button */
     .tool-btn-flipbook {
-        width: auto !important; padding: 0 .75rem; gap: .4rem;
+        width: auto; padding: 0 .75rem; gap: .4rem;
         font-size: .8rem; font-weight: 600; white-space: nowrap;
+    }
+    @media (max-width: 640px) {
+        .tool-btn-flipbook { width: 30px; padding: 0; gap: 0; font-size: 0; }
+    }
+
+    /* Flipbook overlay responsive */
+    @media (max-width: 640px) {
+        .fb-top         { padding: .45rem .75rem; }
+        .fb-top-title   { font-size: .82rem; }
+        .fb-icon-btn    { padding: .28rem .5rem; font-size: .75rem; gap: .25rem; }
+        .fb-controls    { padding: .5rem .75rem; gap: .5rem; flex-wrap: wrap; justify-content: center; }
+        .fb-arrow       { width: 36px; height: 36px; font-size: 1rem; }
+        .fb-arrow-left  { left: .35rem; }
+        .fb-arrow-right { right: .35rem; }
+        .fb-page-pill   { min-width: 80px; font-size: .78rem; padding: .25rem .75rem; }
+    }
+    @media (max-width: 430px) {
+        .fb-top-actions .fb-icon-btn:not(:last-child) { display: none; }
     }
     </style>
 </head>

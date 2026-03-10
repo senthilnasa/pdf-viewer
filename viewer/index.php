@@ -778,14 +778,16 @@ const VIEWER_CONFIG = {
         const stageW   = Math.max(100, stageEl.clientWidth  - arrowPad);
         const stageH   = Math.max(100, stageEl.clientHeight - 20);
         const spread   = fb.doubleMode ? 2 : 1;
-        const bookMaxW = Math.min(stageW, 1100);
-        const bookMaxH = stageH;
-        const scaleW   = bookMaxW / (pageW * spread);
-        const scaleH   = bookMaxH / pageH;
-        const dispScale = Math.min(scaleW, scaleH, 1); // never upscale beyond 100%
-        const dispW    = Math.round(pageW  * dispScale);
-        const dispH    = Math.round(pageH  * dispScale);
-        const renderScale = Math.min(dispScale * 2, 2); // 2× for crisp pixels
+        // Fill the stage fully — no arbitrary width cap, no upscale prevention
+        // (PDF points are 72dpi so a 595pt page at scale=1 is only ~595px — always needs upscaling)
+        const scaleW    = stageW  / (pageW * spread);
+        const scaleH    = stageH  / pageH;
+        const dispScale = Math.min(scaleW, scaleH);   // fit to stage, no upper cap
+        const dispW     = Math.round(pageW  * dispScale);
+        const dispH     = Math.round(pageH  * dispScale);
+        // Render at device pixel ratio for crisp text on HiDPI screens
+        const dpr         = Math.min(window.devicePixelRatio || 1, 3);
+        const renderScale = dispScale * dpr;
 
         /* --- render all pages --- */
         bookEl.innerHTML = '';

@@ -796,7 +796,16 @@ const VIEWER_CONFIG = {
         ctrlEl.style.cssText    = 'display:none';   // hide again until init completes
         thumbBarEl.style.cssText = 'display:none';
         console.log('[Flipbook] Stage measured :', stageW + '×' + stageH, '(isMobile=' + isMobile + ', arrowPad=' + arrowPad + ')');
-        console.log('[Flipbook] Controls height:', document.getElementById('fbControls').offsetHeight, '| Thumbs height:', document.getElementById('fbThumbsBar').offsetHeight);
+
+        // Auto-fallback: if double-page spread would fill less than 55% of stage height,
+        // switch to single-page — avoids large black bars on square/landscape PDFs
+        if (!isMobile && fb.doubleMode) {
+            const testScale = Math.min(stageW / (pageW * 2), stageH / pageH);
+            const heightFill = (pageH * testScale) / stageH;
+            console.log('[Flipbook] Double-page height fill:', (heightFill * 100).toFixed(1) + '%', heightFill < 0.55 ? '→ switching to single-page' : '→ keeping double');
+            if (heightFill < 0.55) fb.doubleMode = false;
+        }
+
         const spread    = fb.doubleMode ? 2 : 1;
         // Scale so the spread fills the stage, derived purely from PDF page size
         const scaleW    = stageW / (pageW * spread);
@@ -826,7 +835,7 @@ const VIEWER_CONFIG = {
             const cv    = document.createElement('canvas');
             cv.width    = vp.width;
             cv.height   = vp.height;
-            await page.render({ canvasContext: cv.getContext('2d'), viewport: vp }).promise;
+            await page.render({ canvasContext: cv.getContext('2d', { willReadFrequently: true }), viewport: vp }).promise;
             fb.canvases.push(cv);
 
             /* page div for StPageFlip */

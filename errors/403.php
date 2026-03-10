@@ -12,16 +12,24 @@ $loginUrl   = '/admin/login.php';
 $brandColor = '#4f46e5';
 try {
     if (!defined('ROOT')) define('ROOT', dirname(__DIR__));
-    if (file_exists(ROOT . '/includes/helpers.php') && file_exists(ROOT . '/config/app.php')) {
+    // Only bootstrap if helpers not already loaded (avoids double-bootstrap when
+    // this file is included from Auth::requireRole mid-request)
+    if (!function_exists('getSetting') &&
+        file_exists(ROOT . '/includes/helpers.php') &&
+        file_exists(ROOT . '/config/app.php')) {
         require_once ROOT . '/includes/Database.php';
         require_once ROOT . '/includes/Auth.php';
         require_once ROOT . '/includes/helpers.php';
-        $config     = bootstrap();
-        $siteName   = getSetting('site_name', $config['site_name'] ?? 'PDF Viewer');
-        $faviconUrl = getSetting('favicon_url', $config['base_url'] . '/assets/images/favicon.svg');
+        $config = bootstrap();
+    }
+    if (function_exists('getSetting')) {
+        global $config;
+        $_c         = $config ?? [];
+        $siteName   = getSetting('site_name',   $_c['site_name']  ?? 'PDF Viewer');
+        $faviconUrl = getSetting('favicon_url', ($_c['base_url'] ?? '') . '/assets/images/favicon.svg');
         $logoUrl    = getSetting('header_logo', '');
-        $homeUrl    = $config['base_url'] . '/';
-        $loginUrl   = $config['base_url'] . '/admin/login.php';
+        $homeUrl    = ($_c['base_url'] ?? '') . '/';
+        $loginUrl   = ($_c['base_url'] ?? '') . '/admin/login.php';
         $brandColor = getSetting('theme_color', '#4f46e5');
     }
 } catch (Throwable $_) {}

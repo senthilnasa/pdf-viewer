@@ -42,7 +42,7 @@ class Analytics
     public static function getDashboardStats(): array
     {
         $totalViews = (int)Database::fetchScalar('SELECT COUNT(*) FROM pdf_views');
-        $uniqueVisitors = (int)Database::fetchScalar('SELECT COUNT(DISTINCT visitor_ip) FROM pdf_views');
+        $uniqueVisitors = (int)Database::fetchScalar('SELECT COUNT(DISTINCT session_id) FROM pdf_views WHERE session_id IS NOT NULL');
         $todayViews = (int)Database::fetchScalar('SELECT COUNT(*) FROM pdf_views WHERE DATE(visit_time) = CURDATE()');
 
         $topDoc = Database::fetchOne(
@@ -73,7 +73,7 @@ class Analytics
         }
 
         $rows = Database::fetchAll(
-            "SELECT DATE(visit_time) AS day, COUNT(*) AS views, COUNT(DISTINCT visitor_ip) AS unique_visitors
+            "SELECT DATE(visit_time) AS day, COUNT(*) AS views, COUNT(DISTINCT session_id) AS unique_visitors
              FROM pdf_views
              WHERE visit_time >= DATE_SUB(CURDATE(), INTERVAL ? DAY) {$pdfFilter}
              GROUP BY DATE(visit_time)
@@ -109,7 +109,7 @@ class Analytics
         return Database::fetchAll(
             'SELECT p.id, p.title, p.slug,
                     COUNT(v.id) AS total_views,
-                    COUNT(DISTINCT v.visitor_ip) AS unique_visitors,
+                    COUNT(DISTINCT v.session_id) AS unique_visitors,
                     MAX(v.visit_time) AS last_view
              FROM pdf_documents p
              LEFT JOIN pdf_views v ON v.pdf_id = p.id
@@ -145,7 +145,7 @@ class Analytics
         $since = date('Y-m-d H:i:s', strtotime("-{$days} days"));
 
         $total = (int)Database::fetchScalar('SELECT COUNT(*) FROM pdf_views WHERE pdf_id = ?', [$pdfId]);
-        $unique = (int)Database::fetchScalar('SELECT COUNT(DISTINCT visitor_ip) FROM pdf_views WHERE pdf_id = ?', [$pdfId]);
+        $unique = (int)Database::fetchScalar('SELECT COUNT(DISTINCT session_id) FROM pdf_views WHERE pdf_id = ? AND session_id IS NOT NULL', [$pdfId]);
         $period = (int)Database::fetchScalar(
             'SELECT COUNT(*) FROM pdf_views WHERE pdf_id = ? AND visit_time >= ?',
             [$pdfId, $since]
@@ -219,7 +219,7 @@ class Analytics
         return Database::fetchAll(
             'SELECT p.title AS document, p.slug,
                     COUNT(v.id) AS views,
-                    COUNT(DISTINCT v.visitor_ip) AS unique_visitors,
+                    COUNT(DISTINCT v.session_id) AS unique_visitors,
                     DATE(MAX(v.visit_time)) AS last_visit
              FROM pdf_documents p
              LEFT JOIN pdf_views v ON v.pdf_id = p.id

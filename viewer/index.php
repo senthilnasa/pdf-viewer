@@ -283,17 +283,16 @@ $fileSizeHuman = $pdfManager->humanFileSize($pdf['file_size']);
 
     /* Flipbook overlay responsive */
     @media (max-width: 640px) {
-        .fb-top         { padding: .45rem .75rem; }
-        .fb-top-title   { font-size: .82rem; }
-        .fb-icon-btn    { padding: .28rem .5rem; font-size: .75rem; gap: .25rem; }
-        .fb-controls    { padding: .5rem .75rem; gap: .5rem; flex-wrap: wrap; justify-content: center; }
-        .fb-arrow       { width: 36px; height: 36px; font-size: 1rem; }
-        .fb-arrow-left  { left: .35rem; }
-        .fb-arrow-right { right: .35rem; }
-        .fb-page-pill   { min-width: 80px; font-size: .78rem; padding: .25rem .75rem; }
-    }
-    @media (max-width: 430px) {
-        .fb-top-actions .fb-icon-btn:not(:last-child) { display: none; }
+        .fb-top        { padding: .45rem .75rem; }
+        .fb-top-title  { font-size: .82rem; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .fb-icon-btn   { padding: .28rem .5rem; font-size: .75rem; gap: .25rem; }
+        .fb-controls   { padding: .5rem .75rem; gap: .5rem; flex-wrap: wrap; justify-content: center; }
+        /* Hide side arrows on mobile — use bottom prev/next controls instead */
+        .fb-arrow      { display: none; }
+        .fb-page-pill  { min-width: 80px; font-size: .78rem; padding: .25rem .75rem; }
+        /* Keep only PDF View + Close in top bar on mobile */
+        #fbZoomOut, #fbZoomIn, .fb-zoom-label,
+        #fbSoundBtn, #fbLayoutBtn { display: none; }
     }
     </style>
 </head>
@@ -526,7 +525,7 @@ $fileSizeHuman = $pdfManager->humanFileSize($pdf['file_size']);
             <!-- Single / double page -->
             <button class="fb-icon-btn" id="fbLayoutBtn" title="Toggle single/double page">
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" width="15" height="15"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
-                Double
+                <span class="fb-layout-label">Double</span>
             </button>
             <!-- Switch to PDF Viewer -->
             <button class="fb-icon-btn" onclick="closeFlipbook()" title="Switch to standard PDF viewer">
@@ -652,6 +651,8 @@ const VIEWER_CONFIG = {
     window.openFlipbook = async function () {
         document.getElementById('fbOverlay').classList.remove('fb-hidden');
         document.body.style.overflow = 'hidden';
+        // Wait one frame so the overlay is painted and stage dimensions are available
+        await new Promise(r => requestAnimationFrame(r));
         if (!fb.ready) await initFlipbook();
     };
 
@@ -716,9 +717,10 @@ const VIEWER_CONFIG = {
 
     /* ---------- layout toggle (single / double) ---------- */
     document.getElementById('fbLayoutBtn').addEventListener('click', async function () {
-        fb.doubleMode    = !fb.doubleMode;
-        fb.singleFlipTo  = null;
-        this.textContent = fb.doubleMode ? ' Double' : ' Single';
+        fb.doubleMode   = !fb.doubleMode;
+        fb.singleFlipTo = null;
+        const lbl = this.querySelector('.fb-layout-label');
+        if (lbl) lbl.textContent = fb.doubleMode ? 'Double' : 'Single';
         // Reinitialize with new layout
         fb.ready = false;
         document.getElementById('fbBook').innerHTML = '';
@@ -770,8 +772,11 @@ const VIEWER_CONFIG = {
         const pageH    = vp1.height;
 
         /* --- compute display size to fill stage --- */
-        const stageW   = stageEl.clientWidth  - 120; // leave room for arrows
-        const stageH   = stageEl.clientHeight - 20;
+        const isMobile = window.innerWidth <= 640;
+        if (isMobile) fb.doubleMode = false;          // force single-page on mobile
+        const arrowPad = isMobile ? 10 : 120;         // side arrows hidden on mobile
+        const stageW   = Math.max(100, stageEl.clientWidth  - arrowPad);
+        const stageH   = Math.max(100, stageEl.clientHeight - 20);
         const spread   = fb.doubleMode ? 2 : 1;
         const bookMaxW = Math.min(stageW, 1100);
         const bookMaxH = stageH;

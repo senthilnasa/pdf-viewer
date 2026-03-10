@@ -59,7 +59,13 @@ class Auth
         $minLevel  = $hierarchy[$minRole] ?? 99;
         if ($userLevel < $minLevel) {
             http_response_code(403);
-            die('Access denied.');
+            $errorMessage = 'You don\'t have sufficient permissions to access this page.';
+            if (defined('ROOT') && file_exists(ROOT . '/errors/403.php')) {
+                include ROOT . '/errors/403.php';
+            } else {
+                echo '<h1>403 — Access Denied</h1><p>' . htmlspecialchars($errorMessage) . '</p>';
+            }
+            exit;
         }
     }
 
@@ -157,11 +163,7 @@ class Auth
             ]);
             $user = Database::fetchOne('SELECT * FROM users WHERE id = ?', [$existing['id']]);
         } else {
-            $id = Database::insert(
-                'INSERT INTO users (name, email, google_id, avatar, role, auth_provider, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                [$userInfo['name'], $userInfo['email'], $userInfo['sub'], $userInfo['picture'] ?? null, 'viewer', 'google', 'active']
-            );
-            $user = Database::fetchOne('SELECT * FROM users WHERE id = ?', [$id]);
+            return ['success' => false, 'error' => 'No account found for this email address. Please contact an administrator to get access.'];
         }
 
         if ($user['status'] !== 'active') {

@@ -765,27 +765,35 @@ const VIEWER_CONFIG = {
         const pdfDoc = await pdfjsLib.getDocument(VIEWER_CONFIG.pdfUrl).promise;
         fb.totalPages = pdfDoc.numPages;
 
-        /* --- measure first page for aspect ratio --- */
-        const pg1      = await pdfDoc.getPage(1);
-        const vp1      = pg1.getViewport({ scale: 1 });
-        const pageW    = vp1.width;
-        const pageH    = vp1.height;
+        /* --- measure first page for exact PDF aspect ratio --- */
+        const pg1   = await pdfDoc.getPage(1);
+        const vp1   = pg1.getViewport({ scale: 1 });
+        const pageW = vp1.width;
+        const pageH = vp1.height;
 
-        /* --- compute display size to fill stage --- */
-        const isMobile = window.innerWidth <= 640;
-        if (isMobile) fb.doubleMode = false;          // force single-page on mobile
-        const arrowPad = isMobile ? 10 : 120;         // side arrows hidden on mobile
-        const stageW   = Math.max(100, stageEl.clientWidth  - arrowPad);
-        const stageH   = Math.max(100, stageEl.clientHeight - 20);
-        const spread   = fb.doubleMode ? 2 : 1;
-        // Fill the stage fully — no arbitrary width cap, no upscale prevention
-        // (PDF points are 72dpi so a 595pt page at scale=1 is only ~595px — always needs upscaling)
-        const scaleW    = stageW  / (pageW * spread);
-        const scaleH    = stageH  / pageH;
-        const dispScale = Math.min(scaleW, scaleH);   // fit to stage, no upper cap
+        /* --- compute display size from PDF dimensions + actual stage size ---
+         * Pre-show controls/thumbs (invisible) so the stage already has its
+         * final height when we measure — prevents the book being oversized. */
+        const isMobile   = window.innerWidth <= 640;
+        if (isMobile) fb.doubleMode = false;
+        const arrowPad   = isMobile ? 10 : 120;
+        const ctrlEl     = document.getElementById('fbControls');
+        const thumbBarEl = document.getElementById('fbThumbsBar');
+        ctrlEl.style.cssText    = 'display:flex;visibility:hidden';
+        thumbBarEl.style.cssText = 'display:block;visibility:hidden';
+        await new Promise(r => requestAnimationFrame(r));       // let browser reflow
+        const stageW = Math.max(100, stageEl.clientWidth  - arrowPad);
+        const stageH = Math.max(100, stageEl.clientHeight - 8);
+        ctrlEl.style.cssText    = '';   // back to display:none (HTML attr)
+        thumbBarEl.style.cssText = '';
+        const spread    = fb.doubleMode ? 2 : 1;
+        // Scale so the spread fills the stage, derived purely from PDF page size
+        const scaleW    = stageW / (pageW * spread);
+        const scaleH    = stageH / pageH;
+        const dispScale = Math.min(scaleW, scaleH);
         const dispW     = Math.round(pageW  * dispScale);
         const dispH     = Math.round(pageH  * dispScale);
-        // Render at device pixel ratio for crisp text on HiDPI screens
+        // Render at device-pixel-ratio resolution for crisp text on HiDPI screens
         const dpr         = Math.min(window.devicePixelRatio || 1, 3);
         const renderScale = dispScale * dpr;
 

@@ -329,7 +329,7 @@ $fileSizeHuman = $pdfManager->humanFileSize($pdf['file_size']);
                 <span id="pdfPageCount">— pages</span>
             </span>
             <span class="file-info-item">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"/></svg>
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8 4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"/></svg>
                 <?= e($fileSizeHuman) ?>
             </span>
         </div>
@@ -752,6 +752,13 @@ const VIEWER_CONFIG = {
         const bookEl     = document.getElementById('fbBook');
         const stageEl    = document.getElementById('fbStage');
 
+        console.group('%c[Flipbook] initFlipbook()', 'color:#4f46e5;font-weight:bold');
+        console.log('[Flipbook] Viewport      :', window.innerWidth + '×' + window.innerHeight);
+        console.log('[Flipbook] devicePixelRatio:', window.devicePixelRatio);
+        console.log('[Flipbook] doubleMode    :', fb.doubleMode);
+        console.log('[Flipbook] overlay visible:', !document.getElementById('fbOverlay').classList.contains('fb-hidden'));
+        console.log('[Flipbook] stageEl offset :', stageEl.offsetWidth + '×' + stageEl.offsetHeight, '| client:', stageEl.clientWidth + '×' + stageEl.clientHeight);
+
         loadingEl.style.display = 'flex';
 
         /* --- ensure PDF.js worker --- */
@@ -764,12 +771,14 @@ const VIEWER_CONFIG = {
         textEl.textContent = 'Loading document…';
         const pdfDoc = await pdfjsLib.getDocument(VIEWER_CONFIG.pdfUrl).promise;
         fb.totalPages = pdfDoc.numPages;
+        console.log('[Flipbook] PDF loaded     :', fb.totalPages, 'pages');
 
         /* --- measure first page for exact PDF aspect ratio --- */
         const pg1   = await pdfDoc.getPage(1);
         const vp1   = pg1.getViewport({ scale: 1 });
         const pageW = vp1.width;
         const pageH = vp1.height;
+        console.log('[Flipbook] PDF page size  :', pageW.toFixed(1) + '×' + pageH.toFixed(1), 'pt  aspect:', (pageW/pageH).toFixed(3));
 
         /* --- compute display size from PDF dimensions + actual stage size ---
          * Pre-show controls/thumbs (invisible) so the stage already has its
@@ -786,6 +795,8 @@ const VIEWER_CONFIG = {
         const stageH = Math.max(100, stageEl.clientHeight - 8);
         ctrlEl.style.cssText    = '';   // back to display:none (HTML attr)
         thumbBarEl.style.cssText = '';
+        console.log('[Flipbook] Stage measured :', stageW + '×' + stageH, '(isMobile=' + isMobile + ', arrowPad=' + arrowPad + ')');
+        console.log('[Flipbook] Controls height:', document.getElementById('fbControls').offsetHeight, '| Thumbs height:', document.getElementById('fbThumbsBar').offsetHeight);
         const spread    = fb.doubleMode ? 2 : 1;
         // Scale so the spread fills the stage, derived purely from PDF page size
         const scaleW    = stageW / (pageW * spread);
@@ -796,6 +807,9 @@ const VIEWER_CONFIG = {
         // Render at device-pixel-ratio resolution for crisp text on HiDPI screens
         const dpr         = Math.min(window.devicePixelRatio || 1, 3);
         const renderScale = dispScale * dpr;
+        console.log('[Flipbook] Layout         :', 'spread=' + spread, 'scaleW=' + scaleW.toFixed(3), 'scaleH=' + scaleH.toFixed(3), '→ dispScale=' + dispScale.toFixed(3));
+        console.log('[Flipbook] Page dispSize  :', dispW + '×' + dispH, 'px  (spread total: ' + (dispW*spread) + '×' + dispH + ')');
+        console.log('[Flipbook] dpr=' + dpr, '→ renderScale=' + renderScale.toFixed(3), '  renderCanvas=' + Math.round(pageW*renderScale) + '×' + Math.round(pageH*renderScale));
 
         /* --- render all pages --- */
         bookEl.innerHTML = '';
@@ -937,6 +951,14 @@ const VIEWER_CONFIG = {
         document.getElementById('fbControls').style.display  = 'flex';
         document.getElementById('fbThumbsBar').style.display = 'block';
         updateUI(0);
+
+        // Final state after controls appear
+        await new Promise(r => requestAnimationFrame(r));
+        console.log('[Flipbook] Final stageEl  :', stageEl.clientWidth + '×' + stageEl.clientHeight, '(after controls shown)');
+        console.log('[Flipbook] bookEl size    :', bookEl.offsetWidth + '×' + bookEl.offsetHeight);
+        console.log('[Flipbook] fbBookWrap     :', document.getElementById('fbBookWrap').offsetWidth + '×' + document.getElementById('fbBookWrap').offsetHeight);
+        console.log('%c[Flipbook] Init complete ✓', 'color:#22c55e;font-weight:bold');
+        console.groupEnd();
     }
 }());
 </script>

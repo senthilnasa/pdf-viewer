@@ -793,8 +793,8 @@ const VIEWER_CONFIG = {
         await new Promise(r => requestAnimationFrame(r));       // let browser reflow
         const stageW = Math.max(100, stageEl.clientWidth  - arrowPad);
         const stageH = Math.max(100, stageEl.clientHeight - 8);
-        ctrlEl.style.cssText    = '';   // back to display:none (HTML attr)
-        thumbBarEl.style.cssText = '';
+        ctrlEl.style.cssText    = 'display:none';   // hide again until init completes
+        thumbBarEl.style.cssText = 'display:none';
         console.log('[Flipbook] Stage measured :', stageW + '×' + stageH, '(isMobile=' + isMobile + ', arrowPad=' + arrowPad + ')');
         console.log('[Flipbook] Controls height:', document.getElementById('fbControls').offsetHeight, '| Thumbs height:', document.getElementById('fbThumbsBar').offsetHeight);
         const spread    = fb.doubleMode ? 2 : 1;

@@ -5,6 +5,9 @@
 # Uploaded PDF files and logos — never commit user data
 uploads/*.pdf
 uploads/logo_*
+uploads/favicon_*
+uploads/app_icon_*
+uploads/*.ico
 uploads/*.png
 uploads/*.jpg
 uploads/*.jpeg

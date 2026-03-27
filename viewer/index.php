@@ -110,9 +110,14 @@ $prefs = array_merge([
     'show_page_num'   => true,
     'show_file_info'  => true,
     'show_share_btn'  => true,
-    'show_download'   => (bool)$pdf['enable_download'] && (bool)getSetting('enable_download', true),
+    'show_download'   => true,
     'theme'           => 'dark',
 ], $globalPrefs, $docPrefs);
+
+// Security: style prefs cannot override the actual download permission
+$prefs['show_download'] = $prefs['show_download']
+    && (bool)$pdf['enable_download']
+    && (bool)getSetting('enable_download', true);
 
 $siteName  = getSetting('site_name', $config['site_name']);
 $metaTitle = ($pdf['meta_title'] ?: $pdf['title']) . e($config['meta_title_suffix'] ?? ' | PDF Viewer');

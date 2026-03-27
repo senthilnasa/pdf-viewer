@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(docker --version)",
+      "Bash(docker compose version)",
+      "Bash(docker cp /c/Development/pdf-viewer/viewer/index.php pdfviewer_app:/var/www/html/viewer/index.php)",
+      "Bash(git add admin/pdfs.php admin/settings.php admin/team.php admin/viewer-style.php viewer/index.php assets/js/admin-ajax.js README.md)"
+    ]
+  }
+}

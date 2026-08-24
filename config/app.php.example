@@ -27,6 +27,26 @@ return [
     'enable_download'           => true,
     'enable_flipbook'           => false,
 
+    // Email / SMTP Configuration
+    'email_provider'            => 'smtp', // 'smtp' or 'null' for demo/testing
+    'email_from'                => 'noreply@example.com',
+    'email_from_name'           => 'PDF Viewer',
+    'smtp_host'                 => 'smtp.mailtrap.io', // or your SMTP server
+    'smtp_port'                 => 587,
+    'smtp_username'             => '',
+    'smtp_password'             => '',
+    'smtp_encryption'           => 'tls', // 'tls' or 'ssl'
+
+    // Storage Configuration
+    'storage_driver'            => 'local', // 'local', 's3', 'cloudflare_r2'
+    's3_key'                    => '',
+    's3_secret'                 => '',
+    's3_bucket'                 => '',
+    's3_region'                 => 'us-east-1',
+    'cloudflare_r2_token'       => '',
+    'cloudflare_r2_bucket'      => '',
+    'cloudflare_r2_domain'      => '',
+
     // Analytics
     'analytics_enabled'         => true,
     'ga_measurement_id'         => '', // Google Analytics 4 ID e.g. G-XXXXXXXXXX

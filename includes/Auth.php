@@ -84,6 +84,10 @@ class Auth
 
         if (!$user || !$user['password'] || !password_verify($password, $user['password'])) {
             $this->recordFailedAttempt($ip, $email);
+            // Log failed attempt
+            if ($user) {
+                AuditLog::log(AuditLog::ACTION_LOGIN_FAILED, $user['id'], '', 0, [], $ip, $_SERVER['HTTP_USER_AGENT'] ?? '');
+            }
             return ['success' => false, 'error' => 'Invalid email or password.'];
         }
 
@@ -92,11 +96,19 @@ class Auth
         $this->createUserSession($user);
         Database::query('UPDATE users SET last_login = NOW() WHERE id = ?', [$user['id']]);
 
+        // Log successful login
+        AuditLog::log(AuditLog::ACTION_LOGIN, $user['id'], '', 0, [], $ip, $_SERVER['HTTP_USER_AGENT'] ?? '');
+
         return ['success' => true, 'user' => $user];
     }
 
     public function logout(): void
     {
+        // Log logout action
+        if (isset($_SESSION['user_id'])) {
+            AuditLog::log(AuditLog::ACTION_LOGOUT, $_SESSION['user_id'], '', 0);
+        }
+
         $_SESSION = [];
         if (ini_get('session.use_cookies')) {
             $p = session_get_cookie_params();
@@ -211,14 +223,43 @@ class Auth
 
     public function generateResetToken(string $email): ?string
     {
-        $user = Database::fetchOne('SELECT id FROM users WHERE email = ? AND auth_provider = ?', [$email, 'local']);
+        $user = Database::fetchOne('SELECT * FROM users WHERE email = ? AND auth_provider = ?', [$email, 'local']);
         if (!$user) return null;
 
         $token   = bin2hex(random_bytes(32));
         $expires = date('Y-m-d H:i:s', time() + 3600);
         Database::query('UPDATE users SET reset_token = ?, reset_expires = ? WHERE id = ?', [$token, $expires, $user['id']]);
 
+        // Send reset email
+        $this->sendPasswordResetEmail($user, $token);
+
+        // Log action
+        AuditLog::log(AuditLog::ACTION_PASSWORD_RESET, $user['id'], 'user', $user['id']);
+
         return $token;
+    }
+
+    private function sendPasswordResetEmail(array $user, string $token): void
+    {
+        try {
+            $resetLink = $this->config['base_url'] . '/admin/forgot-password.php?step=reset&token=' . $token;
+            $emailData = EmailTemplate::passwordResetEmail($user, $resetLink, getSetting('site_name', 'PDF Viewer'));
+
+            EmailManager::send(
+                $user['email'],
+                $emailData['subject'],
+                $emailData['html'],
+                $emailData['plain'],
+                [],
+                [
+                    'email_provider' => getSetting('email_provider', 'smtp'),
+                    'from_email' => getSetting('email_from', 'noreply@example.com'),
+                    'from_name' => getSetting('site_name', 'PDF Viewer'),
+                ]
+            );
+        } catch (Throwable $e) {
+            error_log('Failed to send password reset email: ' . $e->getMessage());
+        }
     }
 
     public function validateResetToken(string $token): array|false

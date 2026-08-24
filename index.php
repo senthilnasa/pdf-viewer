@@ -10,6 +10,10 @@ require ROOT . '/includes/Database.php';
 require ROOT . '/includes/Auth.php';
 require ROOT . '/includes/PDF.php';
 require ROOT . '/includes/Analytics.php';
+require ROOT . '/includes/EmailProvider.php';
+require ROOT . '/includes/EmailTemplate.php';
+require ROOT . '/includes/AuditLog.php';
+require ROOT . '/includes/Notification.php';
 require ROOT . '/includes/helpers.php';
 
 $config = bootstrap();

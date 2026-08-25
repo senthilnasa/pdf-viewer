@@ -9,6 +9,7 @@ require ROOT . '/includes/helpers.php';
 $config = bootstrap();
 $auth->requireRole('admin');
 
+$user     = $auth->currentUser();
 $siteName = getSetting('site_name', $config['site_name']);
 $error    = '';
 $success  = '';
@@ -33,6 +34,21 @@ if (isPost()) {
         setSetting('demo_cron_token', bin2hex(random_bytes(24)), 'string');
         $success = 'Cron token regenerated.';
 
+    } elseif ($action === 'send_test_email') {
+        $testTo = trim(post('test_email_to')) ?: $user['email'];
+        if (!filter_var($testTo, FILTER_VALIDATE_EMAIL)) {
+            $error = 'Enter a valid email address to send the test to.';
+        } else {
+            $emailData = EmailTemplate::welcomeEmail(['name' => 'there'], $siteName);
+            $testHtml = '<p style="background:#eef2ff;border-left:4px solid #4f46e5;padding:10px 14px;border-radius:4px;margin-bottom:16px">This is a <strong>test email</strong> sent from ' . e($siteName) . ' to verify your email configuration.</p>' . $emailData['html'];
+            $result = EmailManager::send($testTo, 'Test Email — ' . $siteName, $testHtml, 'This is a test email sent to verify your email configuration.', [], emailProviderConfig());
+            if ($result['success']) {
+                $success = 'Test email sent to ' . e($testTo) . ' via ' . e($result['provider'] ?? 'unknown') . '.';
+            } else {
+                $error = 'Failed to send test email: ' . e($result['message'] ?? 'unknown error');
+            }
+        }
+
     } else {
         // Normal save
         $demoWasEnabled = getSetting('demo_mode', false);
@@ -53,7 +69,20 @@ if (isPost()) {
             'google_allowed_domains' => ['json',    array_values(array_filter(array_map('trim', explode(',', post('google_allowed_domains', '')))))],
             'demo_mode'              => ['boolean', post('demo_mode', '0')],
             'demo_reset_interval'    => ['integer', max(5, (int)post('demo_reset_interval', 30))],
+            'email_provider'         => ['string',  in_array(post('email_provider'), ['smtp', 'null']) ? post('email_provider') : 'smtp'],
+            'email_from'             => ['string',  trim(post('email_from'))],
+            'email_from_name'        => ['string',  trim(post('email_from_name'))],
+            'smtp_host'              => ['string',  trim(post('smtp_host'))],
+            'smtp_port'              => ['integer', max(1, (int)post('smtp_port', 587))],
+            'smtp_username'          => ['string',  trim(post('smtp_username'))],
+            'smtp_encryption'        => ['string',  in_array(post('smtp_encryption'), ['tls', 'ssl', 'none']) ? post('smtp_encryption') : 'tls'],
         ];
+
+        // Only overwrite the stored SMTP password if a new one was actually typed
+        // (the form field is left blank on load so we never echo the secret back).
+        if (post('smtp_password') !== '') {
+            $keys['smtp_password'] = ['string', post('smtp_password')];
+        }
 
         foreach ($keys as $key => [$type, $value]) {
             setSetting($key, $value, $type);
@@ -113,6 +142,14 @@ $settings = [
     'demo_last_reset_at'     => (int)getSetting('demo_last_reset_at', 0),
     'demo_cron_token'        => getSetting('demo_cron_token', ''),
     'demo_has_snapshot'      => (bool)Database::fetchScalar('SELECT 1 FROM settings WHERE `key` = "demo_snapshot"'),
+    'email_provider'         => getSetting('email_provider', 'smtp'),
+    'email_from'             => getSetting('email_from', ''),
+    'email_from_name'        => getSetting('email_from_name', ''),
+    'smtp_host'              => getSetting('smtp_host', ''),
+    'smtp_port'              => (int)getSetting('smtp_port', 587),
+    'smtp_username'          => getSetting('smtp_username', ''),
+    'smtp_has_password'      => getSetting('smtp_password', '') !== '',
+    'smtp_encryption'        => getSetting('smtp_encryption', 'tls'),
 ];
 $googleDomains = implode(', ', (array)($settings['google_allowed_domains'] ?? []));
 
@@ -232,6 +269,59 @@ $demoCronPhpCmd = 'php ' . ROOT . '/cron.php';
                     <div class="form-group">
                         <label class="form-label">Cloudflare Analytics Token</label>
                         <input type="text" name="cloudflare_token" class="form-control" placeholder="Optional" value="<?= e($settings['cloudflare_token']) ?>">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Email / SMTP -->
+            <div class="card" style="margin-bottom:1.5rem">
+                <div class="card-header"><h3 class="card-title">Email / SMTP</h3></div>
+                <div class="card-body">
+                    <div class="form-group">
+                        <label class="form-label">Delivery Method</label>
+                        <select name="email_provider" class="form-control">
+                            <option value="smtp" <?= $settings['email_provider'] === 'smtp' ? 'selected' : '' ?>>SMTP (recommended)</option>
+                            <option value="null" <?= $settings['email_provider'] === 'null' ? 'selected' : '' ?>>Disabled — log only (development/demo)</option>
+                        </select>
+                        <small class="text-muted">"Log only" writes emails to a local file instead of sending them — useful for testing without a mail server.</small>
+                    </div>
+                    <div class="grid-2">
+                        <div class="form-group">
+                            <label class="form-label">From Email Address</label>
+                            <input type="email" name="email_from" class="form-control" placeholder="noreply@yourdomain.com" value="<?= e($settings['email_from']) ?>">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">From Name</label>
+                            <input type="text" name="email_from_name" class="form-control" placeholder="<?= e($siteName) ?>" value="<?= e($settings['email_from_name']) ?>">
+                        </div>
+                    </div>
+                    <div class="grid-2">
+                        <div class="form-group">
+                            <label class="form-label">SMTP Host</label>
+                            <input type="text" name="smtp_host" class="form-control" placeholder="smtp.mailtrap.io" value="<?= e($settings['smtp_host']) ?>">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">SMTP Port</label>
+                            <input type="number" name="smtp_port" class="form-control" value="<?= (int)$settings['smtp_port'] ?>">
+                        </div>
+                    </div>
+                    <div class="grid-2">
+                        <div class="form-group">
+                            <label class="form-label">SMTP Username</label>
+                            <input type="text" name="smtp_username" class="form-control" value="<?= e($settings['smtp_username']) ?>">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">SMTP Password</label>
+                            <input type="password" name="smtp_password" class="form-control" placeholder="<?= $settings['smtp_has_password'] ? '••••••••  (leave blank to keep)' : '' ?>">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Encryption</label>
+                        <select name="smtp_encryption" class="form-control" style="max-width:200px">
+                            <option value="tls" <?= $settings['smtp_encryption'] === 'tls' ? 'selected' : '' ?>>TLS (STARTTLS)</option>
+                            <option value="ssl" <?= $settings['smtp_encryption'] === 'ssl' ? 'selected' : '' ?>>SSL</option>
+                            <option value="none" <?= $settings['smtp_encryption'] === 'none' ? 'selected' : '' ?>>None</option>
+                        </select>
                     </div>
                 </div>
             </div>
@@ -401,6 +491,25 @@ $demoCronPhpCmd = 'php ' . ROOT . '/cron.php';
             </div>
 
             <button type="submit" name="_action" value="save" class="btn btn-primary">Save Settings</button>
+        </form>
+
+        <!-- Send Test Email — separate form so it doesn't submit the whole settings page -->
+        <form method="POST" style="max-width:700px" data-ajax>
+            <?= csrfField() ?>
+            <input type="hidden" name="_action" value="send_test_email">
+            <div class="card" style="margin-bottom:1.5rem">
+                <div class="card-header"><h3 class="card-title">Test Email Delivery</h3></div>
+                <div class="card-body">
+                    <p class="text-muted" style="margin-bottom:.75rem;font-size:.85rem">Save your email settings above first, then send a test message to confirm delivery works.</p>
+                    <div style="display:flex;gap:.75rem;align-items:flex-end;flex-wrap:wrap">
+                        <div class="form-group" style="flex:1;min-width:220px;margin-bottom:0">
+                            <label class="form-label">Send test email to</label>
+                            <input type="email" name="test_email_to" class="form-control" placeholder="<?= e($user['email']) ?>">
+                        </div>
+                        <button type="submit" class="btn btn-outline">Send Test Email</button>
+                    </div>
+                </div>
+            </div>
         </form>
     </div>
 </div>

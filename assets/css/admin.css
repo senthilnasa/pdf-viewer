@@ -500,3 +500,278 @@ small.text-muted { font-size: .78rem; }
 @media (max-width: 480px) {
     .stats-grid { grid-template-columns: 1fr; }
 }
+
+/* ------------------------------------------------------------------ */
+/* Motion — subtle micro-interactions                                 */
+/* ------------------------------------------------------------------ */
+
+:root {
+    --ease-out:      cubic-bezier(.16,1,.3,1);
+    --ease-spring:   cubic-bezier(.34,1.56,.64,1);
+    --dur-fast:      .15s;
+    --dur:           .25s;
+    --dur-slow:      .4s;
+}
+
+@keyframes fadeSlideUp {
+    from { opacity: 0; transform: translateY(10px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+
+@keyframes scaleIn {
+    from { opacity: 0; transform: scale(.96); }
+    to   { opacity: 1; transform: scale(1); }
+}
+
+@keyframes softPulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(239,68,68,.55); }
+    50%      { box-shadow: 0 0 0 5px rgba(239,68,68,0); }
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/* Page-level entrance */
+.admin-content > .page-header {
+    animation: fadeSlideUp var(--dur-slow) var(--ease-out) both;
+}
+
+.admin-content > *:not(.page-header) {
+    animation: fadeSlideUp var(--dur-slow) var(--ease-out) both;
+    animation-delay: .04s;
+}
+
+/* Stat cards — gentle stagger */
+.stats-grid .stat-card {
+    animation: fadeSlideUp var(--dur-slow) var(--ease-out) both;
+}
+.stats-grid .stat-card:nth-child(1) { animation-delay: .03s; }
+.stats-grid .stat-card:nth-child(2) { animation-delay: .08s; }
+.stats-grid .stat-card:nth-child(3) { animation-delay: .13s; }
+.stats-grid .stat-card:nth-child(4) { animation-delay: .18s; }
+.stats-grid .stat-card:nth-child(n+5) { animation-delay: .22s; }
+
+.stat-card {
+    transition: transform var(--dur) var(--ease-out), box-shadow var(--dur) var(--ease-out), border-color var(--dur);
+}
+.stat-card:hover {
+    transform: translateY(-3px);
+    box-shadow: var(--shadow-md);
+    border-color: var(--primary-light);
+}
+.stat-icon { transition: transform var(--dur-fast) var(--ease-spring); }
+.stat-card:hover .stat-icon { transform: scale(1.08) rotate(-3deg); }
+
+/* Cards */
+.card {
+    transition: box-shadow var(--dur) var(--ease-out), border-color var(--dur), transform var(--dur) var(--ease-out);
+}
+.card:hover {
+    box-shadow: var(--shadow-md);
+}
+
+/* Buttons — press feedback + shimmer-free hover lift */
+.btn {
+    position: relative;
+    transform: translateZ(0);
+    transition: background-color var(--dur-fast), border-color var(--dur-fast),
+                color var(--dur-fast), transform var(--dur-fast) var(--ease-spring),
+                box-shadow var(--dur-fast);
+}
+.btn-primary:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(79,70,229,.28); }
+.btn:active { transform: translateY(0) scale(.97); }
+.btn:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(79,70,229,.28);
+}
+.btn[disabled] { transform: none !important; }
+
+/* Nav items — smooth active state slide */
+.nav-item {
+    position: relative;
+    overflow: hidden;
+}
+.nav-item::before {
+    content: '';
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 3px;
+    background: var(--primary);
+    transform: scaleY(0);
+    transition: transform var(--dur) var(--ease-out);
+}
+.nav-item.active::before { transform: scaleY(1); }
+.nav-item span { transition: transform var(--dur-fast) var(--ease-out); }
+.nav-item:hover span { transform: translateX(2px); }
+
+/* Sidebar entrance */
+.admin-sidebar { animation: fadeIn var(--dur-slow) var(--ease-out) both; }
+
+/* Table rows — staggered reveal, capped so long tables don't lag */
+.table tbody tr {
+    animation: fadeIn var(--dur) var(--ease-out) both;
+}
+.table tbody tr:nth-child(1) { animation-delay: .02s; }
+.table tbody tr:nth-child(2) { animation-delay: .05s; }
+.table tbody tr:nth-child(3) { animation-delay: .08s; }
+.table tbody tr:nth-child(4) { animation-delay: .11s; }
+.table tbody tr:nth-child(5) { animation-delay: .14s; }
+.table tbody tr:nth-child(n+6) { animation-delay: .16s; }
+
+.table tbody tr {
+    transition: background-color var(--dur-fast);
+}
+
+/* Alerts — slide in */
+.alert {
+    animation: fadeSlideUp var(--dur) var(--ease-out) both;
+}
+
+/* Badges — soft entrance */
+.badge { transition: transform var(--dur-fast) var(--ease-spring); }
+
+/* Modal — fade + scale instead of hard cut */
+.modal {
+    display: flex;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity var(--dur) var(--ease-out), visibility 0s linear var(--dur);
+}
+.modal.open {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+    transition: opacity var(--dur) var(--ease-out);
+}
+.modal-dialog {
+    transform: scale(.95) translateY(8px);
+    transition: transform var(--dur) var(--ease-spring);
+}
+.modal.open .modal-dialog {
+    transform: scale(1) translateY(0);
+}
+
+/* Form controls — focus polish */
+.form-control { transition: border-color var(--dur-fast), box-shadow var(--dur-fast), transform var(--dur-fast); }
+
+/* Notification bell */
+.notif-bell {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    color: var(--text-muted);
+    cursor: pointer;
+    border: none;
+    background: transparent;
+    transition: background-color var(--dur-fast), color var(--dur-fast);
+}
+.notif-bell:hover { background: var(--bg-secondary); color: var(--text); }
+.notif-bell .bell-dot {
+    position: absolute;
+    top: 7px;
+    right: 7px;
+    width: 8px;
+    height: 8px;
+    background: var(--danger);
+    border: 2px solid var(--bg);
+    border-radius: 50%;
+    animation: softPulse 2s ease-in-out infinite;
+}
+
+.notif-dropdown {
+    position: absolute;
+    top: calc(100% + 10px);
+    right: 0;
+    width: 340px;
+    max-height: 420px;
+    overflow-y: auto;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: var(--shadow-md);
+    z-index: 300;
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(-6px) scale(.98);
+    transform-origin: top right;
+    transition: opacity var(--dur) var(--ease-out), transform var(--dur) var(--ease-spring), visibility 0s linear var(--dur);
+}
+.notif-dropdown.open {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0) scale(1);
+    transition: opacity var(--dur) var(--ease-out), transform var(--dur) var(--ease-spring);
+}
+.notif-dropdown-header {
+    padding: .85rem 1rem;
+    border-bottom: 1px solid var(--border);
+    font-weight: 700;
+    font-size: .85rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.notif-dropdown-item {
+    display: block;
+    padding: .75rem 1rem;
+    border-bottom: 1px solid var(--border);
+    text-decoration: none;
+    color: inherit;
+    transition: background-color var(--dur-fast);
+}
+.notif-dropdown-item:last-child { border-bottom: none; }
+.notif-dropdown-item:hover { background: var(--bg-secondary); }
+.notif-dropdown-item.unread { background: rgba(79,70,229,.04); }
+.notif-dropdown-empty {
+    padding: 2rem 1rem;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: .85rem;
+}
+.notif-dropdown-footer {
+    padding: .65rem 1rem;
+    text-align: center;
+    border-top: 1px solid var(--border);
+}
+.notif-dropdown-footer a {
+    color: var(--primary);
+    font-size: .8rem;
+    font-weight: 600;
+    text-decoration: none;
+}
+
+/* Skeleton loader utility (for future async content) */
+.skeleton {
+    background: linear-gradient(90deg, var(--bg-secondary) 25%, #eef1f6 37%, var(--bg-secondary) 63%);
+    background-size: 400% 100%;
+    animation: skeleton-shimmer 1.4s ease infinite;
+    border-radius: 6px;
+}
+@keyframes skeleton-shimmer {
+    0%   { background-position: 100% 50%; }
+    100% { background-position: 0 50%; }
+}
+
+/* Spinner utility */
+.spin { animation: spin .7s linear infinite; }
+
+/* Respect reduced-motion preference */
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: .001ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: .001ms !important;
+        scroll-behavior: auto !important;
+    }
+}

@@ -126,8 +126,17 @@ $_homeUrl    = htmlspecialchars($config['base_url'] . '/');
 
             <h1 class="error-title">Link Unavailable</h1>
             <p class="error-message">
-                This share link is invalid, has expired, or has reached its maximum view limit.
-                Please request a new link from the document owner.
+                <?php switch ($shareErrorReason ?? null):
+                    case 'expired': ?>
+                        This share link has expired. Please request a new link from the document owner.
+                    <?php break; case 'limit_reached': ?>
+                        This share link has reached its maximum number of views. Please request a new link from the document owner.
+                    <?php break; case 'not_found': ?>
+                        This share link is invalid or has been revoked. Please request a new link from the document owner.
+                    <?php break; default: ?>
+                        This share link is invalid, has expired, or has reached its maximum view limit.
+                        Please request a new link from the document owner.
+                <?php endswitch; ?>
             </p>
 
             <div class="error-actions">

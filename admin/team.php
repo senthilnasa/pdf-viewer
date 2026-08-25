@@ -35,12 +35,28 @@ if (isPost()) {
                 $error = 'A user with this email already exists.';
             } else {
                 $token = bin2hex(random_bytes(32));
-                Database::insert(
+                $newUserId = (int)Database::insert(
                     'INSERT INTO users (name, email, role, status, invite_token, auth_provider) VALUES (?, ?, ?, ?, ?, ?)',
                     [$name ?: $email, $email, $role, 'invited', $token, 'local']
                 );
                 $_inviteUrl = $config['base_url'] . '/admin/accept-invite.php?token=' . $token;
-                $success    = 'User invited! Share the invite link with them.';
+
+                AuditLog::log(AuditLog::ACTION_INVITATION_SENT, $user['id'], 'user', $newUserId, ['email' => $email, 'role' => $role]);
+
+                try {
+                    $emailData = EmailTemplate::invitationEmail(
+                        ['name' => $name ?: $email, 'role' => $role],
+                        $_inviteUrl,
+                        $siteName,
+                        $user['name']
+                    );
+                    $emailResult = EmailManager::send($email, $emailData['subject'], $emailData['html'], $emailData['plain'], [], emailProviderConfig());
+                    $success = $emailResult['success']
+                        ? 'User invited! An invitation email was sent to ' . $email . '.'
+                        : 'User invited, but the email could not be sent (' . ($emailResult['message'] ?? 'unknown error') . '). Share the link below manually.';
+                } catch (Throwable $e) {
+                    $success = 'User invited! Share the invite link with them.';
+                }
             }
         }
     }
@@ -54,6 +70,7 @@ if (isPost()) {
             $error = 'Invalid role.';
         } else {
             Database::query('UPDATE users SET role = ? WHERE id = ?', [$newRole, $memberId]);
+            AuditLog::log(AuditLog::ACTION_USER_ROLE_CHANGED, $user['id'], 'user', $memberId, ['new_role' => $newRole]);
             $success = 'Role updated.';
         }
     }
@@ -64,6 +81,7 @@ if (isPost()) {
             $error = "You cannot deactivate your own account.";
         } else {
             Database::query("UPDATE users SET status = 'inactive' WHERE id = ?", [$memberId]);
+            AuditLog::log(AuditLog::ACTION_USER_DEACTIVATED, $user['id'], 'user', $memberId);
             $success = 'User deactivated.';
         }
     }
@@ -71,6 +89,7 @@ if (isPost()) {
     if ($postAction === 'activate') {
         $memberId = (int)post('member_id');
         Database::query("UPDATE users SET status = 'active' WHERE id = ?", [$memberId]);
+        AuditLog::log(AuditLog::ACTION_USER_ACTIVATED, $user['id'], 'user', $memberId);
         $success = 'User activated.';
     }
 
@@ -80,6 +99,7 @@ if (isPost()) {
             $error = 'You cannot delete your own account.';
         } else {
             Database::query('DELETE FROM users WHERE id = ?', [$memberId]);
+            AuditLog::log(AuditLog::ACTION_USER_DELETED, $user['id'], 'user', $memberId);
             $success = 'User deleted.';
         }
     }

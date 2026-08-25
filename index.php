@@ -29,7 +29,7 @@ if ($route === 'sitemap') {
     }
 
     $docs = Database::fetchAll(
-        "SELECT slug, updated_at FROM pdf_documents WHERE status = 'active' AND visibility = 'public' ORDER BY updated_at DESC"
+        "SELECT slug, updated_at FROM pdf_documents WHERE status = 'active' AND visibility = 'public' AND show_in_catalog = 1 ORDER BY updated_at DESC"
     );
 
     header('Content-Type: application/xml; charset=utf-8');
@@ -47,10 +47,21 @@ if ($route === 'sitemap') {
 }
 
 // ------------------------------------------------------------------
-// Home page — public document listing
+// Home page — public document catalog
 // ------------------------------------------------------------------
-$pdfManager = new PDF($config);
-$docs = $pdfManager->getAll(['status' => 'active', 'visibility' => 'public']);
+$pdfManager  = new PDF($config);
+$categoryMgr = new Category();
+
+$categoryFilter = (int)get('category', 0);
+
+$catalogFilters = ['status' => 'active', 'visibility' => 'public', 'show_in_catalog' => 1];
+if ($categoryFilter) {
+    $catalogFilters['category_id'] = $categoryFilter;
+}
+
+$docs = $pdfManager->getAll($catalogFilters);
+$parentCategories = $categoryMgr->getParents();
+$activeCategory = $categoryFilter ? $categoryMgr->getById($categoryFilter) : false;
 $siteName = getSetting('site_name', $config['site_name']);
 
 ?>
@@ -86,15 +97,24 @@ $siteName = getSetting('site_name', $config['site_name']);
 <main class="container">
     <div class="page-header">
         <h1>Document Library</h1>
-        <p>Browse our collection of online documents.</p>
+        <p><?= $activeCategory ? 'Browsing ' . e($activeCategory['name']) : 'Browse our collection of online documents.' ?></p>
     </div>
+
+    <?php if (!empty($parentCategories)): ?>
+    <div class="category-nav">
+        <a href="<?= e($config['base_url']) ?>/" class="category-pill <?= !$categoryFilter ? 'active' : '' ?>">All</a>
+        <?php foreach ($parentCategories as $cat): ?>
+        <a href="?category=<?= $cat['id'] ?>" class="category-pill <?= $categoryFilter === (int)$cat['id'] ? 'active' : '' ?>"><?= e($cat['name']) ?></a>
+        <?php endforeach; ?>
+    </div>
+    <?php endif; ?>
 
     <?php if (empty($docs)): ?>
     <div class="empty-state">
         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" width="48" height="48">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
         </svg>
-        <p>No documents available yet.</p>
+        <p><?= $activeCategory ? 'No documents in this category yet.' : 'No documents available yet.' ?></p>
     </div>
     <?php else: ?>
     <div class="doc-grid">
@@ -106,6 +126,12 @@ $siteName = getSetting('site_name', $config['site_name']);
                 </svg>
             </div>
             <div class="doc-info">
+                <?php if ($doc['category_name']): ?>
+                <div class="doc-category">
+                    <?php if ($doc['category_parent_name']): ?><?= e($doc['category_parent_name']) ?> <span class="doc-category-sep">›</span> <?php endif; ?>
+                    <?= e($doc['category_name']) ?>
+                </div>
+                <?php endif; ?>
                 <h3><?= e($doc['title']) ?></h3>
                 <?php if ($doc['description']): ?>
                     <p><?= e(mb_substr($doc['description'], 0, 100)) ?>...</p>

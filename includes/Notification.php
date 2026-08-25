@@ -114,11 +114,7 @@ class Notification
             $htmlBody,
             $plainBody,
             [],
-            [
-                'email_provider' => getSetting('email_provider', 'smtp'),
-                'from_email' => getSetting('email_from', 'noreply@example.com'),
-                'from_name' => getSetting('site_name', 'PDF Viewer'),
-            ]
+            emailProviderConfig()
         );
     }
 }

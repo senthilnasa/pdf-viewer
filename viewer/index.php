@@ -29,46 +29,68 @@ if (!$pdf) {
 // Share link token flow
 $shareLink = null;
 if ($token) {
-    // Check if this token exists and requires a password before full validation
-    $rawLink = Database::fetchOne(
-        'SELECT sl.password, p.slug FROM share_links sl JOIN pdf_documents p ON p.id = sl.pdf_id WHERE sl.token = ?',
-        [$token]
-    );
+    $rawLink = $pdfManager->getShareLinkByToken($token);
 
     $sharePass      = trim(get('share_pass', post('share_pass', '')));
     $sharePassError = '';
 
     if ($rawLink && $rawLink['password']) {
-        // Password-protected link: show form if password not submitted yet
-        if ($_SERVER['REQUEST_METHOD'] !== 'POST' && !isset($_GET['share_pass'])) {
-            // Show password entry form
+        // Password-protected link: show form if password not submitted yet,
+        // unless this exact token was already verified earlier in the session
+        // (needed so refreshes / PDF.js range requests don't re-prompt).
+        $alreadyVerified = !empty($_SESSION['share_verified'][$token]);
+
+        if (!$alreadyVerified && $_SERVER['REQUEST_METHOD'] !== 'POST' && !isset($_GET['share_pass'])) {
             $siteName = getSetting('site_name', $config['site_name'] ?? 'PDF Viewer');
             include ROOT . '/viewer/partials/share-password-form.php';
             exit;
         }
 
-        // Validate with password
-        $shareLink = $pdfManager->validateShareLink($token, $sharePass);
+        $check = $alreadyVerified
+            ? ['ok' => true, 'reason' => null]
+            : $pdfManager->checkShareLink($rawLink, $sharePass);
 
-        if (!$shareLink) {
-            // Wrong password or expired/limit reached — re-show form with error
-            $siteName       = getSetting('site_name', $config['site_name'] ?? 'PDF Viewer');
-            $sharePassError = 'Incorrect password. Please try again.';
-            include ROOT . '/viewer/partials/share-password-form.php';
+        if (!$check['ok']) {
+            if ($check['reason'] === 'invalid_password') {
+                // Wrong password — re-show the form with an error, not a hard 403.
+                $siteName       = getSetting('site_name', $config['site_name'] ?? 'PDF Viewer');
+                $sharePassError = 'Incorrect password. Please try again.';
+                include ROOT . '/viewer/partials/share-password-form.php';
+                exit;
+            }
+            $siteName        = getSetting('site_name', $config['site_name'] ?? 'PDF Viewer');
+            $shareErrorReason = $check['reason'];
+            http_response_code(403);
+            include ROOT . '/viewer/partials/share-error.php';
             exit;
         }
+
+        $shareLink = $rawLink;
+        $_SESSION['share_verified'][$token] = true;
     } else {
         // No password required — normal validation
-        $shareLink = $pdfManager->validateShareLink($token);
+        $check = $pdfManager->checkShareLink($rawLink);
+        if (!$check['ok']) {
+            $siteName         = getSetting('site_name', $config['site_name'] ?? 'PDF Viewer');
+            $shareErrorReason = $check['reason'];
+            http_response_code(403);
+            include ROOT . '/viewer/partials/share-error.php';
+            exit;
+        }
+        $shareLink = $rawLink;
     }
 
-    if (!$shareLink || $shareLink['slug'] !== $slug) {
-        // Invalid / expired / limit reached — styled error page
-        $siteName = getSetting('site_name', $config['site_name'] ?? 'PDF Viewer');
+    if ($shareLink['slug'] !== $slug) {
+        $siteName         = getSetting('site_name', $config['site_name'] ?? 'PDF Viewer');
+        $shareErrorReason = 'not_found';
         http_response_code(403);
         include ROOT . '/viewer/partials/share-error.php';
         exit;
     }
+
+    // Exactly one real "view" counted per page load, regardless of how many
+    // range requests the PDF viewer subsequently makes against serve-pdf.php.
+    $pdfManager->recordShareLinkView($shareLink['id']);
 }
 
 // Access control

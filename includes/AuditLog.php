@@ -31,6 +31,9 @@ class AuditLog
     public const ACTION_SHARE_LINK_DELETED = 'share_link_deleted';
     public const ACTION_SETTINGS_CHANGED = 'settings_changed';
     public const ACTION_PERMISSION_DENIED = 'permission_denied';
+    public const ACTION_CATEGORY_CREATED = 'category_created';
+    public const ACTION_CATEGORY_UPDATED = 'category_updated';
+    public const ACTION_CATEGORY_DELETED = 'category_deleted';
 
     public static function log(
         string $action,

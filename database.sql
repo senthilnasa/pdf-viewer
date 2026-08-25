@@ -13,6 +13,8 @@ CREATE TABLE IF NOT EXISTS `users` (
     `id`              INT UNSIGNED NOT NULL AUTO_INCREMENT,
     `name`            VARCHAR(120) NOT NULL,
     `email`           VARCHAR(191) NOT NULL,
+    `email_verified`    TINYINT(1) NOT NULL DEFAULT 0,
+    `email_verified_at` DATETIME DEFAULT NULL,
     `password`        VARCHAR(255) DEFAULT NULL COMMENT 'NULL for OAuth-only accounts',
     `role`            ENUM('admin','editor','viewer') NOT NULL DEFAULT 'viewer',
     `auth_provider`   ENUM('local','google') NOT NULL DEFAULT 'local',
@@ -35,6 +37,23 @@ CREATE TABLE IF NOT EXISTS `users` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- --------------------------------------------------------
+-- Categories Table (unlimited parent/child hierarchy via self-reference)
+-- --------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `categories` (
+    `id`         INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `parent_id`  INT UNSIGNED DEFAULT NULL COMMENT 'NULL = top-level parent category',
+    `name`       VARCHAR(150) NOT NULL,
+    `slug`       VARCHAR(160) NOT NULL,
+    `sort_order` INT UNSIGNED NOT NULL DEFAULT 0,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uq_slug` (`slug`),
+    KEY `idx_parent_id` (`parent_id`),
+    CONSTRAINT `fk_cat_parent` FOREIGN KEY (`parent_id`) REFERENCES `categories` (`id`) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- --------------------------------------------------------
 -- PDF Documents Table
 -- --------------------------------------------------------
 CREATE TABLE IF NOT EXISTS `pdf_documents` (
@@ -51,6 +70,8 @@ CREATE TABLE IF NOT EXISTS `pdf_documents` (
     `meta_desc`      VARCHAR(500) DEFAULT NULL,
     `thumbnail`      VARCHAR(500) DEFAULT NULL,
     `enable_download`TINYINT(1) NOT NULL DEFAULT 1,
+    `show_in_catalog`TINYINT(1) NOT NULL DEFAULT 1,
+    `category_id`    INT UNSIGNED DEFAULT NULL,
     `created_by`     INT UNSIGNED NOT NULL,
     `created_at`     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `updated_at`     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -58,7 +79,10 @@ CREATE TABLE IF NOT EXISTS `pdf_documents` (
     UNIQUE KEY `uq_slug` (`slug`),
     KEY `idx_status_visibility` (`status`, `visibility`),
     KEY `idx_created_by` (`created_by`),
-    CONSTRAINT `fk_pdf_user` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE RESTRICT
+    KEY `idx_category_id` (`category_id`),
+    KEY `idx_catalog` (`show_in_catalog`, `status`, `visibility`),
+    CONSTRAINT `fk_pdf_user` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE RESTRICT,
+    CONSTRAINT `fk_pdf_category` FOREIGN KEY (`category_id`) REFERENCES `categories` (`id`) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- --------------------------------------------------------
@@ -277,12 +301,6 @@ CREATE TABLE IF NOT EXISTS `scheduled_tasks` (
     KEY `idx_created_at` (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- --------------------------------------------------------
--- Add email verification columns to users table
--- --------------------------------------------------------
-ALTER TABLE `users` ADD COLUMN IF NOT EXISTS `email_verified` TINYINT(1) NOT NULL DEFAULT 0 AFTER `email`;
-ALTER TABLE `users` ADD COLUMN IF NOT EXISTS `email_verified_at` DATETIME DEFAULT NULL AFTER `email_verified`;
-
 SET FOREIGN_KEY_CHECKS = 1;
 
 -- --------------------------------------------------------
@@ -300,5 +318,13 @@ INSERT INTO `settings` (`key`, `value`, `type`) VALUES
 ('google_client_secret','',             'string'),
 ('google_allowed_domains','[]',         'json'),
 ('cloudflare_token',    '',             'string'),
-('demo_mode',           '0',            'boolean')
+('demo_mode',           '0',            'boolean'),
+('email_provider',      'smtp',         'string'),
+('email_from',          '',             'string'),
+('email_from_name',     '',             'string'),
+('smtp_host',           '',             'string'),
+('smtp_port',           '587',          'integer'),
+('smtp_username',       '',             'string'),
+('smtp_password',       '',             'string'),
+('smtp_encryption',     'tls',          'string')
 ON DUPLICATE KEY UPDATE `value` = VALUES(`value`);

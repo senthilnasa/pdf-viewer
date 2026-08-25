@@ -31,8 +31,19 @@ if (!$pdf) {
 // Access control
 if ($pdf['visibility'] === 'private') {
     if ($token) {
-        $link = $pdfManager->validateShareLink($token);
+        // Read-only check — do NOT re-verify the password here (this endpoint
+        // is hit repeatedly by range requests while the PDF loads) and do NOT
+        // increment view_count here (that happens once, at the viewer page
+        // level, in viewer/index.php). Password-protected links instead rely
+        // on the session flag set once the visitor cleared the password gate.
+        $link = $pdfManager->getShareLinkByToken($token);
         if (!$link || (int)$link['pdf_id'] !== $pdfId) {
+            http_response_code(403);
+            exit('Access denied.');
+        }
+        $check = $pdfManager->checkShareLink($link);
+        $passwordOk = !$link['password'] || !empty($_SESSION['share_verified'][$token]);
+        if ((!$check['ok'] && $check['reason'] !== 'invalid_password') || !$passwordOk) {
             http_response_code(403);
             exit('Access denied.');
         }

@@ -251,11 +251,7 @@ class Auth
                 $emailData['html'],
                 $emailData['plain'],
                 [],
-                [
-                    'email_provider' => getSetting('email_provider', 'smtp'),
-                    'from_email' => getSetting('email_from', 'noreply@example.com'),
-                    'from_name' => getSetting('site_name', 'PDF Viewer'),
-                ]
+                emailProviderConfig()
             );
         } catch (Throwable $e) {
             error_log('Failed to send password reset email: ' . $e->getMessage());

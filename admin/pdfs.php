@@ -9,8 +9,9 @@ require ROOT . '/includes/helpers.php';
 $config = bootstrap();
 $auth->requireRole('editor');
 
-$user       = $auth->currentUser();
-$pdfManager = new PDF($config);
+$user        = $auth->currentUser();
+$pdfManager  = new PDF($config);
+$categoryMgr = new Category();
 $action     = get('action', 'list');
 // $id may arrive via GET (edit/share links) or POST (delete/update hidden field)
 $id         = (int)(get('id', 0) ?: post('id', 0));
@@ -36,11 +37,17 @@ if (isPost()) {
         $metaDesc    = trim(post('meta_desc'));
         $customSlug  = trim(post('slug'));
         $enableDownload = (int)post('enable_download', 1);
+        $showInCatalog  = (int)post('show_in_catalog', 1);
+        $categoryId     = post('category_id') !== '' ? (int)post('category_id') : null;
 
         if (!$title) {
             $error = 'Title is required.';
         } elseif (empty($_FILES['pdf_file']['name'])) {
             $error = 'Please select a PDF file.';
+        } elseif ($showInCatalog && !$categoryId) {
+            $error = 'Select a category for documents shown in the catalog.';
+        } elseif ($categoryId && !$categoryMgr->getById($categoryId)) {
+            $error = 'Selected category does not exist.';
         } else {
             $upload = $pdfManager->handleUpload($_FILES['pdf_file']);
             if (!$upload['success']) {
@@ -57,9 +64,12 @@ if (isPost()) {
                     'meta_title'     => $metaTitle ?: $title,
                     'meta_desc'      => $metaDesc,
                     'enable_download'=> $enableDownload,
+                    'show_in_catalog'=> $showInCatalog,
+                    'category_id'    => $categoryId,
                     'created_by'     => $user['id'],
                 ]);
                 if ($newId) {
+                    AuditLog::log(AuditLog::ACTION_PDF_UPLOADED, $user['id'], 'pdf', $newId, ['title' => $title]);
                     $success = 'PDF uploaded successfully!';
                     $action  = 'list';
                 } else {
@@ -72,6 +82,9 @@ if (isPost()) {
 
     // Update PDF metadata
     if ($postAction === 'update' && $id) {
+        $showInCatalog = (int)post('show_in_catalog', 1);
+        $categoryId    = post('category_id') !== '' ? (int)post('category_id') : null;
+
         $data = [
             'title'          => trim(post('title')),
             'description'    => trim(post('description')),
@@ -81,10 +94,18 @@ if (isPost()) {
             'meta_title'     => trim(post('meta_title')),
             'meta_desc'      => trim(post('meta_desc')),
             'enable_download'=> (int)post('enable_download', 1),
+            'show_in_catalog'=> $showInCatalog,
+            'category_id'    => $categoryId,
         ];
 
+        if ($showInCatalog && !$categoryId) {
+            $error = 'Select a category for documents shown in the catalog.';
+        } elseif ($categoryId && !$categoryMgr->getById($categoryId)) {
+            $error = 'Selected category does not exist.';
+        }
+
         // Handle file replacement
-        if (!empty($_FILES['pdf_file']['name'])) {
+        if (!$error && !empty($_FILES['pdf_file']['name'])) {
             $upload = $pdfManager->handleUpload($_FILES['pdf_file']);
             if (!$upload['success']) {
                 $error = $upload['error'];
@@ -95,6 +116,7 @@ if (isPost()) {
 
         if (!$error) {
             if ($pdfManager->update($id, $data)) {
+                AuditLog::log(AuditLog::ACTION_PDF_UPDATED, $user['id'], 'pdf', $id);
                 $success = 'PDF updated successfully!';
                 $action  = 'list';
             } else {
@@ -107,6 +129,7 @@ if (isPost()) {
     if ($postAction === 'delete' && $id) {
         $auth->requireRole('admin');
         $pdfManager->delete($id);
+        AuditLog::log(AuditLog::ACTION_PDF_DELETED, $user['id'], 'pdf', $id);
         $success = 'PDF deleted.';
         $action  = 'list';
     }
@@ -123,6 +146,7 @@ if (isPost()) {
         $pdf_for_share = $pdfManager->getById($id);
         $shareToken    = $pdfManager->createShareLink($id, $user['id'], array_filter($opts, fn($v) => $v !== null));
         $shareUrl      = $config['base_url'] . '/pdf/' . ($pdf_for_share['slug'] ?? '') . '?token=' . $shareToken;
+        AuditLog::log(AuditLog::ACTION_SHARE_LINK_CREATED, $user['id'], 'pdf', $id);
         $success = 'Share link created!';
     }
 
@@ -130,6 +154,7 @@ if (isPost()) {
     if ($postAction === 'delete_share') {
         $linkId = (int)post('link_id');
         $pdfManager->deleteShareLink($linkId);
+        AuditLog::log(AuditLog::ACTION_SHARE_LINK_DELETED, $user['id'], 'share_link', $linkId);
         $success = 'Share link removed.';
     }
 
@@ -163,6 +188,23 @@ if (in_array($action, ['edit', 'share']) && $id) {
 
 $docs = ($action === 'list') ? $pdfManager->getAll(['search' => get('search', '')]) : [];
 $shareLinks = ($action === 'share' && $pdf) ? $pdfManager->getShareLinks($id) : [];
+$categoryOptions = in_array($action, ['upload', 'edit']) ? $categoryMgr->getFlatWithDepth() : [];
+
+/** Render <option> tags for the category <select>, indenting children. */
+function renderCategoryOptions(array $categoryOptions, ?int $selectedId): string
+{
+    if (empty($categoryOptions)) {
+        return '<option value="" disabled>No categories yet — create one first</option>';
+    }
+    $html = '';
+    foreach ($categoryOptions as $cat) {
+        $indent = str_repeat('&nbsp;&nbsp;&nbsp;&nbsp;', $cat['depth']);
+        $prefix = $cat['depth'] > 0 ? '— ' : '';
+        $selected = ((int)$cat['id'] === $selectedId) ? 'selected' : '';
+        $html .= '<option value="' . (int)$cat['id'] . '" ' . $selected . '>' . $indent . $prefix . e($cat['name']) . '</option>';
+    }
+    return $html;
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -207,7 +249,7 @@ $shareLinks = ($action === 'share' && $pdf) ? $pdfManager->getShareLinks($id) : 
         </div>
         <div class="card-body" style="padding:0">
             <table class="table">
-                <thead><tr><th>Title / Slug</th><th>Visibility</th><th>Status</th><th>Views</th><th>Size</th><th>Created</th><th>Actions</th></tr></thead>
+                <thead><tr><th>Title / Slug</th><th>Category</th><th>Catalog</th><th>Visibility</th><th>Status</th><th>Views</th><th>Size</th><th>Created</th><th>Actions</th></tr></thead>
                 <tbody>
                 <?php foreach ($docs as $doc): ?>
                 <tr>
@@ -215,6 +257,17 @@ $shareLinks = ($action === 'share' && $pdf) ? $pdfManager->getShareLinks($id) : 
                         <div><strong><?= e($doc['title']) ?></strong></div>
                         <div class="text-muted" style="font-size:.8rem">/pdf/<?= e($doc['slug']) ?></div>
                     </td>
+                    <td>
+                        <?php if ($doc['category_name']): ?>
+                            <?php if ($doc['category_parent_name']): ?>
+                            <span class="badge badge-secondary"><?= e($doc['category_parent_name']) ?></span>
+                            <?php endif; ?>
+                            <span class="badge badge-primary"><?= e($doc['category_name']) ?></span>
+                        <?php else: ?>
+                            <span class="text-muted" style="font-size:.8rem">— Uncategorized —</span>
+                        <?php endif; ?>
+                    </td>
+                    <td><span class="badge badge-<?= $doc['show_in_catalog'] ? 'success' : 'secondary' ?>"><?= $doc['show_in_catalog'] ? 'Visible' : 'Hidden' ?></span></td>
                     <td><span class="badge badge-<?= $doc['visibility'] === 'public' ? 'success' : 'warning' ?>"><?= e($doc['visibility']) ?></span></td>
                     <td><span class="badge badge-<?= $doc['status'] === 'active' ? 'primary' : 'secondary' ?>"><?= e($doc['status']) ?></span></td>
                     <td><?= number_format($doc['total_views']) ?></td>
@@ -290,6 +343,24 @@ $shareLinks = ($action === 'share' && $pdf) ? $pdfManager->getShareLinks($id) : 
                         </select>
                     </div>
                 </div>
+                <div class="grid-2">
+                    <div class="form-group">
+                        <label class="form-label">Show in Catalog</label>
+                        <select name="show_in_catalog" class="form-control" id="upload_show_in_catalog" onchange="document.getElementById('upload_category_wrap').style.display = this.value === '1' ? 'block' : 'none'">
+                            <option value="1">Yes</option>
+                            <option value="0">No</option>
+                        </select>
+                        <small class="text-muted">If No, the document stays in the library but won't appear on the public catalog page.</small>
+                    </div>
+                    <div class="form-group" id="upload_category_wrap">
+                        <label class="form-label">Category *</label>
+                        <select name="category_id" class="form-control">
+                            <option value="">— Select a category —</option>
+                            <?= renderCategoryOptions($categoryOptions, null) ?>
+                        </select>
+                        <small class="text-muted">Required when shown in the catalog. <a href="categories.php" target="_blank">Manage categories</a></small>
+                    </div>
+                </div>
                 <div class="form-group">
                     <label class="form-label">Meta Title (SEO)</label>
                     <input type="text" name="meta_title" class="form-control">
@@ -361,6 +432,24 @@ $shareLinks = ($action === 'share' && $pdf) ? $pdfManager->getShareLinks($id) : 
                         <option value="1" <?= $pdf['enable_download']?'selected':'' ?>>Yes</option>
                         <option value="0" <?= !$pdf['enable_download']?'selected':'' ?>>No</option>
                     </select>
+                </div>
+                <div class="grid-2">
+                    <div class="form-group">
+                        <label class="form-label">Show in Catalog</label>
+                        <select name="show_in_catalog" class="form-control" id="edit_show_in_catalog" onchange="document.getElementById('edit_category_wrap').style.display = this.value === '1' ? 'block' : 'none'">
+                            <option value="1" <?= $pdf['show_in_catalog'] ? 'selected' : '' ?>>Yes</option>
+                            <option value="0" <?= !$pdf['show_in_catalog'] ? 'selected' : '' ?>>No</option>
+                        </select>
+                        <small class="text-muted">If No, the document stays in the library but won't appear on the public catalog page.</small>
+                    </div>
+                    <div class="form-group" id="edit_category_wrap" style="<?= $pdf['show_in_catalog'] ? '' : 'display:none' ?>">
+                        <label class="form-label">Category *</label>
+                        <select name="category_id" class="form-control">
+                            <option value="">— Select a category —</option>
+                            <?= renderCategoryOptions($categoryOptions, $pdf['category_id'] ? (int)$pdf['category_id'] : null) ?>
+                        </select>
+                        <small class="text-muted">Required when shown in the catalog. <a href="categories.php" target="_blank">Manage categories</a></small>
+                    </div>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Meta Title (SEO)</label>

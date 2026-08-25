@@ -37,6 +37,7 @@ if (isPost() && $user) {
             "UPDATE users SET name = ?, password = ?, status = 'active', invite_token = NULL WHERE id = ?",
             [$name, $hash, $user['id']]
         );
+        AuditLog::log(AuditLog::ACTION_INVITATION_ACCEPTED, $user['id'], 'user', $user['id']);
         $success = 'Account activated! <a href="login.php">Login now</a>';
     }
 }

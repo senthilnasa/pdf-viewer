@@ -23,11 +23,14 @@ function bootstrap(): array
     if (!class_exists('Notification')) {
         require_once ROOT . '/includes/Notification.php';
     }
-    if (!class_exists('Storage')) {
+    if (!class_exists('StorageFactory')) {
         require_once ROOT . '/includes/Storage.php';
     }
     if (!class_exists('Scheduler')) {
         require_once ROOT . '/includes/Scheduler.php';
+    }
+    if (!class_exists('Category')) {
+        require_once ROOT . '/includes/Category.php';
     }
 
     $appConfig = ROOT . '/config/app.php';
@@ -142,6 +145,29 @@ function paginate(int $total, int $perPage, int $currentPage, string $urlPattern
         'total_pages'  => $totalPages,
         'offset'       => ($currentPage - 1) * $perPage,
         'url_pattern'  => $urlPattern,
+    ];
+}
+
+// -------------------------------------------------------------------------
+// Email provider config helper
+// -------------------------------------------------------------------------
+
+/**
+ * Build the config array EmailManager/SMTPEmailProvider expect, sourced
+ * from DB-backed settings (configurable via Settings → Email / SMTP).
+ */
+function emailProviderConfig(): array
+{
+    return [
+        'email_provider'  => getSetting('email_provider', 'smtp'),
+        'from_email'      => getSetting('email_from', 'noreply@example.com'),
+        'from_name'       => getSetting('email_from_name', getSetting('site_name', 'PDF Viewer')),
+        'smtp_host'       => getSetting('smtp_host', ''),
+        'smtp_port'       => (int)getSetting('smtp_port', 587),
+        'smtp_username'   => getSetting('smtp_username', ''),
+        'smtp_password'   => getSetting('smtp_password', ''),
+        'smtp_encryption' => getSetting('smtp_encryption', 'tls'),
+        'log_file'        => sys_get_temp_dir() . '/pdfviewer-emails.log',
     ];
 }
 

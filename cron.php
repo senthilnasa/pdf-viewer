@@ -32,7 +32,8 @@ try {
 if (!$isCli) {
     header('Content-Type: application/json; charset=utf-8');
     $expected = getSetting('demo_cron_token', '');
-    $provided = trim($_GET['token'] ?? $_POST['token'] ?? '');
+    $provided = $_GET['token'] ?? $_POST['token'] ?? '';
+    $provided = is_string($provided) ? trim($provided) : ''; // token[]=x used to throw a TypeError
     if (!$expected || !hash_equals($expected, $provided)) {
         http_response_code(401);
         _cronExit(false, 'Invalid or missing cron token.', $isCli);
@@ -40,8 +41,9 @@ if (!$isCli) {
 }
 
 // ── Default interval: 60 minutes ─────────────────────────────────────────────
-$interval = (int)getSetting('demo_reset_interval', 60); // minutes
-if ($interval < 1) $interval = 60;
+// Same default (30 min) as the pseudo-cron in bootstrap() and api/demo-reset.php
+$interval = (int)getSetting('demo_reset_interval', 30); // minutes
+if ($interval < 1) $interval = 30;
 
 // ── Run tasks ─────────────────────────────────────────────────────────────────
 $tasks   = [];
@@ -78,6 +80,32 @@ if (getSetting('demo_mode', false)) {
 }
 
 // Record cron last run time (always, regardless of tasks)
+// Background job queue (emails, cleanups). Previously nothing ever ran it.
+try {
+    $processed = Scheduler::processQueue(25);
+    $failed    = count(array_filter($processed, fn($r) => $r['status'] !== 'completed'));
+    $tasks[] = [
+        'task'    => 'job_queue',
+        'status'  => $failed ? 'partial' : 'ok',
+        'message' => count($processed) . " job(s) processed, {$failed} failed.",
+    ];
+    if ($processed) $ran = true;
+
+    // Housekeeping once a day
+    if ($now - (int)getSetting('cron_last_cleanup', 0) >= 86400) {
+        $deletedTasks = Scheduler::cleanupOldTasks(30);
+        $deletedNotes = Notification::deleteExpired();
+        setSetting('cron_last_cleanup', $now, 'integer');
+        $tasks[] = [
+            'task'    => 'cleanup',
+            'status'  => 'ok',
+            'message' => "Removed {$deletedTasks} old job(s) and {$deletedNotes} expired notification(s).",
+        ];
+    }
+} catch (Throwable $e) {
+    $tasks[] = ['task' => 'job_queue', 'status' => 'error', 'message' => $e->getMessage()];
+}
+
 $ts = (string)$now;
 Database::query(
     'INSERT INTO settings (`key`, `value`, `type`) VALUES ("cron_last_run", ?, "integer")

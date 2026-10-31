@@ -61,11 +61,14 @@
             'display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:.05rem">' +
             '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="#fff" width="12" height="12">' +
             icon + '</svg></span>' +
-            '<span style="flex:1">' + message + '</span>' +
+            '<span style="flex:1" data-toast-msg></span>' +
             '<button style="background:none;border:none;color:#64748b;cursor:pointer;padding:0;' +
             'font-size:1.1rem;line-height:1;pointer-events:all;margin-top:-.1rem;flex-shrink:0">' +
             '&times;</button>';
 
+        // textContent, not innerHTML: messages can echo user input (titles,
+        // email addresses, SMTP errors) and must not be interpreted as HTML.
+        t.querySelector('[data-toast-msg]').textContent = String(message);
         t.querySelector('button').onclick = function () { dismiss(t); };
         getContainer().appendChild(t);
 
@@ -104,18 +107,28 @@
         if (form._ajaxBound) return;
         form._ajaxBound = true;
 
-        // Track which submit button was clicked (for name=_action value=... buttons)
+        // Fallback submitter tracking for browsers without SubmitEvent.submitter
         var submitter = null;
         form.querySelectorAll('[type=submit]').forEach(function (btn) {
-            btn.addEventListener('click', function () { submitter = btn; });
+            btn.addEventListener('click', function (ev) {
+                // A cancelled inline onclick="return confirm(...)" must not leave
+                // a stale submitter behind for the next submission.
+                submitter = ev.defaultPrevented ? null : btn;
+            });
         });
 
         form.addEventListener('submit', function (e) {
+            // Respect inline onsubmit="return confirm(...)" handlers: they run
+            // first and call preventDefault() when the user clicks "Cancel".
+            // Previously this handler ignored that and sent the request anyway,
+            // so e.g. "Delete this PDF permanently?" -> Cancel still deleted it.
+            if (e.defaultPrevented) { submitter = null; return; }
             e.preventDefault();
 
             var fd  = new FormData(form);
-            var btn = submitter || form.querySelector('[type=submit]');
+            var btn = e.submitter || submitter || form.querySelector('[type=submit]');
             submitter = null;
+            if (btn && btn.disabled) return; // already in flight
 
             // Append clicked button's value (FormData skips submit buttons)
             if (btn && btn.name) fd.set(btn.name, btn.value);
@@ -133,8 +146,17 @@
                 body:    fd,
             })
             .then(function (r) {
-                if (!r.ok && r.status !== 422) throw new Error('HTTP ' + r.status);
-                return r.json();
+                // Error responses (403 expired session, 413 upload too large…)
+                // carry a JSON {message}; surface it instead of a generic error.
+                return r.text().then(function (body) {
+                    var data = null;
+                    try { data = JSON.parse(body); } catch (_) {}
+                    if (data && typeof data === 'object') return data;
+                    if (r.status === 413) {
+                        return { success: false, message: 'The file is too large for this server.' };
+                    }
+                    throw new Error('HTTP ' + r.status);
+                });
             })
             .then(function (data) {
                 var type = data.success ? 'success' : 'error';
@@ -142,12 +164,13 @@
 
                 if (data.success) {
                     // Share link result → modal
+                    var onClose = data.reloadOnClose ? function () { location.reload(); } : null;
                     if (data.shareToken && data.shareUrl) {
-                        showShareModal(data.shareToken, data.shareUrl);
+                        showShareModal(data.shareToken, data.shareUrl, onClose);
                     }
                     // Invite URL result → modal
                     if (data.inviteUrl) {
-                        showInviteModal(data.inviteUrl);
+                        showInviteModal(data.inviteUrl, onClose);
                     }
                     // Reload or redirect
                     if (data.redirect) {
@@ -171,27 +194,29 @@
     }
 
     // ── Share Link Result Modal ───────────────────────────────────────────────
-    function showShareModal(token, url) {
+    function showShareModal(token, url, onClose) {
         _modal(
             'Share Link Created',
             '<p style="font-size:.85rem;color:#94a3b8;margin:0 0 .75rem">Copy this URL and send it to your recipients:</p>' +
             _copyRow('share-link-url', url) +
-            '<p style="font-size:.75rem;color:#475569;margin:.6rem 0 0">Token: <code style="color:#94a3b8">' + _esc(token) + '</code></p>'
+            '<p style="font-size:.75rem;color:#475569;margin:.6rem 0 0">Token: <code style="color:#94a3b8">' + _esc(token) + '</code></p>',
+            onClose
         );
     }
 
     // ── Invite URL Modal ──────────────────────────────────────────────────────
-    function showInviteModal(url) {
+    function showInviteModal(url, onClose) {
         _modal(
             'User Invited',
             '<p style="font-size:.85rem;color:#94a3b8;margin:0 0 .75rem">Share this invite link with the new user:</p>' +
-            _copyRow('invite-url', url)
+            _copyRow('invite-url', url),
+            onClose
         );
     }
 
     // ── Modal helper ──────────────────────────────────────────────────────────
     var _modalId = 0;
-    function _modal(title, body) {
+    function _modal(title, body, onClose) {
         var id = 'ajax-modal-' + (++_modalId);
         var wrap = document.createElement('div');
         wrap.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.65);' +
@@ -201,11 +226,16 @@
             'padding:1.75rem;max-width:520px;width:100%;box-shadow:0 24px 64px rgba(0,0,0,.5)">' +
             '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.1rem">' +
             '<h3 style="margin:0;font-size:1.05rem;color:#f1f5f9;font-weight:700">' + _esc(title) + '</h3>' +
-            '<button onclick="document.getElementById(\'' + id + '\').remove()" ' +
+            '<button type="button" data-modal-close ' +
             'style="background:none;border:none;color:#94a3b8;cursor:pointer;font-size:1.35rem;line-height:1">&times;</button></div>' +
             body + '</div>';
         wrap.id = id;
-        wrap.addEventListener('click', function (e) { if (e.target === wrap) wrap.remove(); });
+        function close() {
+            wrap.remove();
+            if (typeof onClose === 'function') onClose();
+        }
+        wrap.querySelector('[data-modal-close]').addEventListener('click', close);
+        wrap.addEventListener('click', function (e) { if (e.target === wrap) close(); });
         document.body.appendChild(wrap);
     }
 

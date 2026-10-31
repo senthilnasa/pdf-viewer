@@ -59,6 +59,50 @@ $branding = [
     'login_bg'      => getSetting('login_bg',      '#0f172a'),
 ];
 
+// Upload helpers: the stored extension is derived from the sniffed MIME type,
+// never from the client-supplied filename (which allowed e.g. a PNG/PHP
+// polyglot named "logo.phtml" to be written into uploads/).
+const BRANDING_IMAGE_TYPES = [
+    'image/png'                => 'png',
+    'image/jpeg'               => 'jpg',
+    'image/gif'                => 'gif',
+    'image/webp'               => 'webp',
+    'image/svg+xml'            => 'svg',
+    'image/x-icon'             => 'ico',
+    'image/vnd.microsoft.icon' => 'ico',
+];
+
+/** @return array{0:?string,1:?string} [publicUrl, error] */
+function storeBrandingImage(array $file, string $prefix, array $allowedMimes, string $baseUrl): array
+{
+    if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK || !is_uploaded_file($file['tmp_name'])) {
+        return [null, 'Image upload failed (error code ' . (int)($file['error'] ?? -1) . ').'];
+    }
+    if ($file['size'] > 2 * 1024 * 1024) {
+        return [null, 'Images must be 2 MB or smaller.'];
+    }
+    $mime = (new finfo(FILEINFO_MIME_TYPE))->file($file['tmp_name']);
+    if (!in_array($mime, $allowedMimes, true) || !isset(BRANDING_IMAGE_TYPES[$mime])) {
+        return [null, null];
+    }
+    $dir = ROOT . '/uploads';
+    if (!is_dir($dir) || !is_writable($dir)) {
+        return [null, 'Server error: the uploads directory is not writable.'];
+    }
+    $name = $prefix . date('Ymd_His_') . bin2hex(random_bytes(4)) . '.' . BRANDING_IMAGE_TYPES[$mime];
+    if (!move_uploaded_file($file['tmp_name'], $dir . '/' . $name)) {
+        return [null, 'Failed to save the uploaded image.'];
+    }
+    return [$baseUrl . '/uploads/' . $name, null];
+}
+
+/** Accept only #rgb / #rrggbb colours (values are written into style="" attributes). */
+function hexColor(string $value, string $fallback): string
+{
+    $value = trim($value);
+    return preg_match('/^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i', $value) ? $value : $fallback;
+}
+
 // ── POST handling ────────────────────────────────────────────────────────────
 if (isPost()) {
     verifyCsrf();
@@ -73,11 +117,11 @@ if (isPost()) {
             'header_logo'     => trim(post('header_logo', '')),
             'header_title'    => trim(post('header_title', '')),
             'header_subtitle' => trim(post('header_subtitle', '')),
-            'header_bg'       => trim(post('header_bg',    '#1e293b')),
-            'header_color'    => trim(post('header_color', '#ffffff')),
+            'header_bg'       => hexColor(post('header_bg',    '#1e293b'), '#1e293b'),
+            'header_color'    => hexColor(post('header_color', '#ffffff'), '#ffffff'),
             'footer_text'     => trim(post('footer_text',  $siteName)),
-            'footer_bg'       => trim(post('footer_bg',    '#f1f5f9')),
-            'footer_color'    => trim(post('footer_color', '#64748b')),
+            'footer_bg'       => hexColor(post('footer_bg',    '#f1f5f9'), '#f1f5f9'),
+            'footer_color'    => hexColor(post('footer_color', '#64748b'), '#64748b'),
             'show_page_num'   => (bool)post('show_page_num',  '0'),
             'show_file_info'  => (bool)post('show_file_info', '0'),
             'show_share_btn'  => (bool)post('show_share_btn', '0'),
@@ -87,17 +131,21 @@ if (isPost()) {
 
         // Logo upload
         if (!empty($_FILES['logo_file']['name'])) {
-            $finfo = new finfo(FILEINFO_MIME_TYPE);
-            $mime  = $finfo->file($_FILES['logo_file']['tmp_name']);
-            if (!in_array($mime, ['image/png','image/jpeg','image/gif','image/svg+xml','image/webp'])) {
-                $error = 'Logo must be PNG, JPG, GIF, SVG or WebP.';
+            [$url, $uploadError] = storeBrandingImage(
+                $_FILES['logo_file'], 'logo_',
+                ['image/png', 'image/jpeg', 'image/gif', 'image/svg+xml', 'image/webp'],
+                $config['base_url']
+            );
+            if ($url) {
+                $newPrefs['header_logo'] = $url;
             } else {
-                $ext  = pathinfo($_FILES['logo_file']['name'], PATHINFO_EXTENSION);
-                $dest = ROOT . '/uploads/logo_' . time() . '.' . $ext;
-                if (move_uploaded_file($_FILES['logo_file']['tmp_name'], $dest)) {
-                    $newPrefs['header_logo'] = $config['base_url'] . '/uploads/' . basename($dest);
-                }
+                $error = $uploadError ?? 'Logo must be PNG, JPG, GIF, SVG or WebP.';
             }
+        }
+
+        // The logo field is a free-text URL too: only allow http(s) or site-relative paths
+        if ($newPrefs['header_logo'] !== '' && !preg_match('#^(https?://|/)#i', $newPrefs['header_logo'])) {
+            $error = 'Logo URL must start with http://, https:// or /.';
         }
 
         if (!$error) {
@@ -122,9 +170,9 @@ if (isPost()) {
 
     /* ---------- Branding tab ---------- */
     if ($postAction === 'branding') {
-        $newThemeColor = trim(post('theme_color', '#4f46e5'));
+        $newThemeColor = hexColor(post('theme_color', '#4f46e5'), '#4f46e5');
         $newTagline    = trim(post('tagline',     ''));
-        $newLoginBg    = trim(post('login_bg',    '#0f172a'));
+        $newLoginBg    = hexColor(post('login_bg',    '#0f172a'), '#0f172a');
         $newSiteName   = trim(post('site_name',   $siteName));
 
         setSetting('theme_color', $newThemeColor, 'string');
@@ -138,16 +186,13 @@ if (isPost()) {
             'icon_file'    => ['app_icon_url',  'app_icon_'],
         ] as $field => [$settingKey, $prefix]) {
             if (!empty($_FILES[$field]['name'])) {
-                $finfo = new finfo(FILEINFO_MIME_TYPE);
-                $mime  = $finfo->file($_FILES[$field]['tmp_name']);
-                if (!in_array($mime, ['image/png','image/jpeg','image/gif','image/svg+xml','image/webp','image/x-icon','image/vnd.microsoft.icon'])) {
-                    $error = 'Icon must be an image file.';
+                [$url, $uploadError] = storeBrandingImage(
+                    $_FILES[$field], $prefix, array_keys(BRANDING_IMAGE_TYPES), $config['base_url']
+                );
+                if ($url) {
+                    setSetting($settingKey, $url, 'string');
                 } else {
-                    $ext  = pathinfo($_FILES[$field]['name'], PATHINFO_EXTENSION) ?: 'png';
-                    $dest = ROOT . '/uploads/' . $prefix . time() . '.' . $ext;
-                    if (move_uploaded_file($_FILES[$field]['tmp_name'], $dest)) {
-                        setSetting($settingKey, $config['base_url'] . '/uploads/' . basename($dest), 'string');
-                    }
+                    $error = $uploadError ?? 'Icon must be a PNG, JPG, GIF, SVG, WebP or ICO image.';
                 }
             }
         }
@@ -302,7 +347,7 @@ if (isPost()) {
         </div>
 
         <?php if ($error):   ?><div class="alert alert-error"><?= e($error) ?></div><?php endif; ?>
-        <?php if ($success): ?><div class="alert alert-success"><?= $success ?></div><?php endif; ?>
+        <?php if ($success): ?><div class="alert alert-success"><?= e($success) ?></div><?php endif; ?>
 
         <?php if ($selectedId): ?>
         <div class="alert alert-info" style="margin-bottom:1rem">

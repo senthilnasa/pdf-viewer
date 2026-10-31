@@ -1,0 +1,20 @@
+{
+    "name": "senthilnasa/pdf-viewer",
+    "description": "Self-hosted PHP platform for publishing, sharing and tracking PDF documents",
+    "type": "project",
+    "license": "MIT",
+    "require": {
+        "php": ">=8.0",
+        "ext-pdo": "*",
+        "ext-fileinfo": "*",
+        "ext-json": "*",
+        "phpmailer/phpmailer": "^6.9"
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "sort-packages": true,
+        "platform": {
+            "php": "8.0.30"
+        }
+    }
+}

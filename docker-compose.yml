@@ -48,7 +48,9 @@ services:
       # Auto-import schema on first start
       - ./database.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
     ports:
-      - "${DB_PORT_EXPOSE:-3306}:3306"
+      # Bound to localhost only: the DB (default root password!) must not be
+      # reachable from other hosts. Remove this mapping entirely in production.
+      - "127.0.0.1:${DB_PORT_EXPOSE:-3306}:3306"
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${DB_ROOT_PASS:-rootsecret}"]
       interval: 10s

@@ -18,8 +18,9 @@ $token = get('token', '');
 $pdf = $pdfManager->getBySlug($slug);
 
 if (!$pdf) {
+    // Plain text — errors/404.php escapes it on output (was double-escaped).
     $errorMessage = $slug
-        ? 'The document "' . htmlspecialchars($slug) . '" could not be found. It may have been removed or the link is incorrect.'
+        ? 'The document "' . $slug . '" could not be found. It may have been removed or the link is incorrect.'
         : 'No document was specified in the URL.';
     http_response_code(404);
     include ROOT . '/errors/404.php';
@@ -29,46 +30,86 @@ if (!$pdf) {
 // Share link token flow
 $shareLink = null;
 if ($token) {
-    // Check if this token exists and requires a password before full validation
-    $rawLink = Database::fetchOne(
-        'SELECT sl.password, p.slug FROM share_links sl JOIN pdf_documents p ON p.id = sl.pdf_id WHERE sl.token = ?',
-        [$token]
-    );
+    $rawLink = $pdfManager->getShareLinkByToken($token);
 
     $sharePass      = trim(get('share_pass', post('share_pass', '')));
     $sharePassError = '';
 
     if ($rawLink && $rawLink['password']) {
-        // Password-protected link: show form if password not submitted yet
-        if ($_SERVER['REQUEST_METHOD'] !== 'POST' && !isset($_GET['share_pass'])) {
-            // Show password entry form
+        // Password-protected link: show form if password not submitted yet,
+        // unless this exact token was already verified earlier in the session
+        // (needed so refreshes / PDF.js range requests don't re-prompt).
+        $alreadyVerified = !empty($_SESSION['share_verified'][$token]);
+
+        if (!$alreadyVerified && $_SERVER['REQUEST_METHOD'] !== 'POST' && !isset($_GET['share_pass'])) {
             $siteName = getSetting('site_name', $config['site_name'] ?? 'PDF Viewer');
             include ROOT . '/viewer/partials/share-password-form.php';
             exit;
         }
 
-        // Validate with password
-        $shareLink = $pdfManager->validateShareLink($token, $sharePass);
+        // Even when the password was verified earlier in this session, the
+        // link's expiry / view limit must still be enforced. Previously a
+        // verified session skipped ALL checks, so an expired or exhausted
+        // link kept working for as long as the session lived.
+        $check = $pdfManager->checkShareLink($rawLink, $sharePass);
+        if ($alreadyVerified && !$check['ok'] && $check['reason'] === 'invalid_password') {
+            $check = ['ok' => true, 'reason' => null];
+        }
+        if (!$check['ok'] && $check['reason'] !== 'invalid_password') {
+            unset($_SESSION['share_verified'][$token]);
+        }
 
-        if (!$shareLink) {
-            // Wrong password or expired/limit reached — re-show form with error
-            $siteName       = getSetting('site_name', $config['site_name'] ?? 'PDF Viewer');
-            $sharePassError = 'Incorrect password. Please try again.';
-            include ROOT . '/viewer/partials/share-password-form.php';
+        if (!$check['ok']) {
+            if ($check['reason'] === 'invalid_password') {
+                // Wrong password — re-show the form with an error, not a hard 403.
+                $siteName       = getSetting('site_name', $config['site_name'] ?? 'PDF Viewer');
+                $sharePassError = 'Incorrect password. Please try again.';
+                include ROOT . '/viewer/partials/share-password-form.php';
+                exit;
+            }
+            $siteName        = getSetting('site_name', $config['site_name'] ?? 'PDF Viewer');
+            $shareErrorReason = $check['reason'];
+            http_response_code(403);
+            include ROOT . '/viewer/partials/share-error.php';
             exit;
         }
+
+        $shareLink = $rawLink;
+        $_SESSION['share_verified'][$token] = true;
     } else {
         // No password required — normal validation
-        $shareLink = $pdfManager->validateShareLink($token);
+        $check = $pdfManager->checkShareLink($rawLink);
+        if (!$check['ok']) {
+            $siteName         = getSetting('site_name', $config['site_name'] ?? 'PDF Viewer');
+            $shareErrorReason = $check['reason'];
+            http_response_code(403);
+            include ROOT . '/viewer/partials/share-error.php';
+            exit;
+        }
+        $shareLink = $rawLink;
     }
 
-    if (!$shareLink || $shareLink['slug'] !== $slug) {
-        // Invalid / expired / limit reached — styled error page
-        $siteName = getSetting('site_name', $config['site_name'] ?? 'PDF Viewer');
+    if ($shareLink['slug'] !== $slug) {
+        $siteName         = getSetting('site_name', $config['site_name'] ?? 'PDF Viewer');
+        $shareErrorReason = 'not_found';
         http_response_code(403);
         include ROOT . '/viewer/partials/share-error.php';
         exit;
     }
+
+    // Exactly one real "view" counted per page load, regardless of how many
+    // range requests the PDF viewer subsequently makes against serve-pdf.php.
+    if (!$pdfManager->recordShareLinkView($shareLink['id'])) {
+        // Lost the race for the last permitted view
+        $siteName         = getSetting('site_name', $config['site_name'] ?? 'PDF Viewer');
+        $shareErrorReason = 'limit_reached';
+        http_response_code(403);
+        include ROOT . '/viewer/partials/share-error.php';
+        exit;
+    }
+    // Let serve-pdf.php stream the file for the view we just counted, even if
+    // that view consumed the last one allowed by max_views.
+    $_SESSION['share_granted'][$token] = true;
 }
 
 // Access control
@@ -120,9 +161,13 @@ $prefs['show_download'] = $prefs['show_download']
     && (bool)getSetting('enable_download', true);
 
 $siteName  = getSetting('site_name', $config['site_name']);
-$metaTitle = ($pdf['meta_title'] ?: $pdf['title']) . e($config['meta_title_suffix'] ?? ' | PDF Viewer');
+$metaTitle = ($pdf['meta_title'] ?: $pdf['title']) . ($config['meta_title_suffix'] ?? ' | PDF Viewer'); // escaped once in <title>
 $metaDesc  = $pdf['meta_desc'] ?: $pdf['description'] ?? '';
 $gaId      = getSetting('ga_measurement_id', '');
+// "Enable Flipbook Mode" setting was saved but never read: the Flipbook
+// button and the "default view = flipbook" auto-open were always active.
+$flipbookEnabled = (bool)getSetting('enable_flipbook', $config['enable_flipbook'] ?? false);
+$defaultView     = $flipbookEnabled ? getSetting('default_view', 'pdf') : 'pdf';
 $cfToken   = getSetting('cloudflare_token', '');
 
 // Serve PDF through API (never expose direct path)
@@ -147,11 +192,11 @@ $fileSizeHuman = $pdfManager->humanFileSize($pdf['file_size']);
     <meta property="og:url" content="<?= e($shareUrl) ?>">
     <meta name="twitter:card" content="summary">
     <?php if ($gaId): ?>
-    <script async src="https://www.googletagmanager.com/gtag/js?id=<?= e($gaId) ?>"></script>
-    <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments)}gtag('js',new Date());gtag('config','<?= e($gaId) ?>');</script>
+    <script async src="https://www.googletagmanager.com/gtag/js?id=<?= e(rawurlencode($gaId)) ?>"></script>
+    <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments)}gtag('js',new Date());gtag('config',<?= json_encode($gaId, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP) ?>);</script>
     <?php endif; ?>
     <?php if ($cfToken): ?>
-    <script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token":"<?= e($cfToken) ?>"}'></script>
+    <script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='<?= e(json_encode(['token' => $cfToken])) ?>'></script>
     <?php endif; ?>
     <link rel="stylesheet" href="../assets/css/viewer.css">
     <style>
@@ -334,7 +379,7 @@ $fileSizeHuman = $pdfManager->humanFileSize($pdf['file_size']);
                 <span id="pdfPageCount">— pages</span>
             </span>
             <span class="file-info-item">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8 4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"/></svg>
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"/></svg>
                 <?= e($fileSizeHuman) ?>
             </span>
         </div>
@@ -350,7 +395,7 @@ $fileSizeHuman = $pdfManager->humanFileSize($pdf['file_size']);
             </button>
             <?php endif; ?>
             <?php if ($prefs['show_download']): ?>
-            <a class="viewer-btn" href="<?= e($pdfUrl) ?>&download=1" download="<?= e($pdf['title']) ?>.pdf" title="Download">
+            <a class="viewer-btn" href="<?= e($pdfUrl . '&download=1') ?>" download="<?= e($pdf['title']) ?>.pdf" title="Download">
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" width="18" height="18">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
                 </svg>
@@ -418,6 +463,7 @@ $fileSizeHuman = $pdfManager->humanFileSize($pdf['file_size']);
             <option value="1.25">125%</option>
             <option value="1.5">150%</option>
             <option value="2">200%</option>
+            <option value="3">300%</option>
         </select>
         <button class="tool-btn" id="zoomIn" title="Zoom in (+)">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7"/></svg>
@@ -434,10 +480,12 @@ $fileSizeHuman = $pdfManager->humanFileSize($pdf['file_size']);
         <button class="tool-btn" id="fullscreenBtn" title="Fullscreen (F)">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/></svg>
         </button>
+        <?php if ($flipbookEnabled): ?>
         <button class="tool-btn tool-btn-flipbook" id="flipbookToggle" title="Flipbook mode" onclick="openFlipbook()">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.746 0 3.332.477 4.5 1.253v13C19.832 18.477 18.246 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/></svg>
             Flipbook
         </button>
+        <?php endif; ?>
         <button class="tool-btn tool-btn-active" id="thumbnailToggle" title="Thumbnails">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"/></svg>
         </button>
@@ -589,7 +637,7 @@ const VIEWER_CONFIG = {
     analyticsUrl:   <?= json_encode($config['base_url'] . '/api/analytics.php') ?>,
     enableAnalytics:<?= json_encode(getSetting('analytics_enabled', true)) ?>,
     showThumbs:     true,
-    defaultView:    <?= json_encode(getSetting('default_view', 'pdf')) ?>,
+    defaultView:    <?= json_encode($defaultView) ?>,
 };
 </script>
 <script src="../assets/js/viewer.js"></script>
@@ -610,45 +658,33 @@ const VIEWER_CONFIG = {
         totalPages:    0,
         zoom:          1.0,
         soundOn:       true,   // on by default
-        doubleMode:    true,   // double-page spread
-        canvases:      [],     // full-res canvases for each page
+        doubleMode:    true,   // effective layout for the current init
+        preferDouble:  true,   // what the user asked for (survives resize / mobile auto-switch)
+        pdfDoc:        null,   // loaded document (re-used across re-inits)
+        canvases:      [],     // canvases elements
+        renderedState: [],     // 'idle', 'rendering', 'rendered'
+        renderTasks:   [],     // active page.render tasks
+        pdfPages:      [],     // cached PDF.js page objects
         singlePageIdx: 0,      // current page in single-page mode
         singleFlipTo:  null,   // function set during single-mode init
         dispW:         0,
         dispH:         0,
     };
 
-    /* ---------- Audio (page-turn swoosh) ---------- */
-    let audioCtx = null;
+    /* ---------- Audio (page-turn sounds) ---------- */
+    const flipAudios = [
+        new Audio('../assets/sounds/sound1.mp3'),
+        new Audio('../assets/sounds/sound2.mp3'),
+        new Audio('../assets/sounds/sound3.mp3')
+    ];
+    flipAudios.forEach(a => { a.preload = 'auto'; });
+
     function playFlipSound() {
         if (!fb.soundOn) return;
         try {
-            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            const sr  = audioCtx.sampleRate;
-            const dur = 0.22;
-            const buf = audioCtx.createBuffer(1, Math.ceil(sr * dur), sr);
-            const d   = buf.getChannelData(0);
-            for (let i = 0; i < d.length; i++) {
-                const t   = i / sr;
-                const env = Math.exp(-t * 18) * Math.sin(Math.PI * t / dur); // bell envelope
-                const noise = (Math.random() * 2 - 1);
-                // low-frequency "whoosh" tone + noise
-                d[i] = (noise * 0.55 + Math.sin(2 * Math.PI * 180 * t) * 0.08) * env * 0.35;
-            }
-            // band-pass: keep papery 400-3000 Hz range
-            const filter = audioCtx.createBiquadFilter();
-            filter.type = 'bandpass';
-            filter.frequency.value = 1200;
-            filter.Q.value = 0.7;
-            const gain = audioCtx.createGain();
-            gain.gain.setValueAtTime(1.4, audioCtx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
-            const src = audioCtx.createBufferSource();
-            src.buffer = buf;
-            src.connect(filter);
-            filter.connect(gain);
-            gain.connect(audioCtx.destination);
-            src.start();
+            const audio = flipAudios[Math.floor(Math.random() * flipAudios.length)];
+            audio.currentTime = 0;
+            audio.play().catch(e => console.log('Audio play blocked:', e));
         } catch (_) {}
     }
 
@@ -656,20 +692,77 @@ const VIEWER_CONFIG = {
     window.openFlipbook = async function () {
         document.getElementById('fbOverlay').classList.remove('fb-hidden');
         document.body.style.overflow = 'hidden';
-        // Wait one frame so the overlay is painted and stage dimensions are available
-        await new Promise(r => requestAnimationFrame(r));
-        if (!fb.ready) await initFlipbook();
+        // Wait 150ms to ensure mobile browsers finish laying out and keyboard collapses
+        await new Promise(r => setTimeout(r, 150));
+        if (!fb.ready) {
+            await initFlipbook();
+        } else {
+            // closeFlipbook() released every page canvas; re-render the pages
+            // around the current position (they used to stay blank on reopen).
+            updateUI(currentFlipIndex());
+        }
     };
+
+    function currentFlipIndex() {
+        if (!fb.doubleMode) return fb.singlePageIdx;
+        try { return fb.instance ? fb.instance.getCurrentPageIndex() : 0; } catch (_) { return 0; }
+    }
+
+    /**
+     * Tear down the current book and return a fresh, empty #fbBook element.
+     * StPageFlip's destroy() REMOVES the element it was mounted on, so after
+     * the first layout toggle / resize the old code kept rendering into a
+     * detached node and the flipbook went blank.
+     */
+    function resetBookElement() {
+        if (fb.instance) {
+            try { fb.instance.destroy(); } catch (_) {}
+            fb.instance = null;
+        }
+        let bookEl = document.getElementById('fbBook');
+        if (!bookEl) {
+            bookEl = document.createElement('div');
+            bookEl.id = 'fbBook';
+            document.getElementById('fbBookWrap').appendChild(bookEl);
+        }
+        bookEl.innerHTML = '';
+        bookEl.removeAttribute('style');
+        bookEl.className = '';
+        return bookEl;
+    }
 
     window.closeFlipbook = function () {
         document.getElementById('fbOverlay').classList.add('fb-hidden');
         document.body.style.overflow = '';
+        unloadAllFlipbookPages();
     };
+
+    function unloadAllFlipbookPages() {
+        if (!fb.canvases) return;
+        for (let i = 0; i < fb.totalPages; i++) {
+            if (fb.renderedState[i] === 'rendered') {
+                if (fb.renderTasks[i]) {
+                    fb.renderTasks[i].cancel();
+                    fb.renderTasks[i] = null;
+                }
+                const cv = fb.canvases[i];
+                if (!cv) { fb.renderedState[i] = 'idle'; continue; }
+                cv.width = 0;
+                cv.height = 0;
+                fb.renderedState[i] = 'idle';
+                const div = cv.parentElement;
+                if (div) {
+                    const loader = div.querySelector('.fb-page-loader');
+                    if (loader) loader.style.display = 'flex';
+                }
+            }
+        }
+    }
 
     /* ---------- flip controls ---------- */
     window.fbFlipPrev = function () {
         if (fb.doubleMode) {
-            if (fb.instance) { fb.instance.flipPrev('bottom'); playFlipSound(); }
+            if (fb.instance) { fb.instance.flipPrev('bottom'); }
         } else {
             if (fb.singleFlipTo && fb.singlePageIdx > 0) {
                 fb.singleFlipTo(fb.singlePageIdx - 1, 'prev');
@@ -678,7 +771,7 @@ const VIEWER_CONFIG = {
     };
     window.fbFlipNext = function () {
         if (fb.doubleMode) {
-            if (fb.instance) { fb.instance.flipNext('bottom'); playFlipSound(); }
+            if (fb.instance) { fb.instance.flipNext('bottom'); }
         } else {
             if (fb.singleFlipTo && fb.singlePageIdx < fb.totalPages - 1) {
                 fb.singleFlipTo(fb.singlePageIdx + 1, 'next');
@@ -722,13 +815,11 @@ const VIEWER_CONFIG = {
 
     /* ---------- layout toggle (single / double) ---------- */
     document.getElementById('fbLayoutBtn').addEventListener('click', async function () {
-        fb.doubleMode   = !fb.doubleMode;
+        fb.preferDouble = !fb.doubleMode;
         fb.singleFlipTo = null;
-        const lbl = this.querySelector('.fb-layout-label');
-        if (lbl) lbl.textContent = fb.doubleMode ? 'Double' : 'Single';
         // Reinitialize with new layout
         fb.ready = false;
-        document.getElementById('fbBook').innerHTML = '';
+        resetBookElement();
         document.getElementById('fbControls').style.display = 'none';
         document.getElementById('fbThumbsBar').style.display = 'none';
         document.getElementById('fbLoading').style.display = 'flex';
@@ -741,123 +832,214 @@ const VIEWER_CONFIG = {
         const total = fb.totalPages;
         const current = pageIndex + 1;
         document.getElementById('fbPagePill').textContent = `${current} / ${total}`;
-        // Update thumbnails
+        
+        // Update active class on thumbnails
         document.querySelectorAll('.fb-thumb-item').forEach((el, i) => {
             el.classList.toggle('fb-thumb-active', i === pageIndex);
         });
         const active = document.querySelector('.fb-thumb-item.fb-thumb-active');
         if (active) active.scrollIntoView({ inline: 'center', behavior: 'smooth' });
+
+        // Trigger lazy loading and memory eviction
+        manageFlipbookMemory(pageIndex);
     }
+
+    /* ---------- Lazy Loading & Memory Eviction ---------- */
+    async function renderFlipbookPage(pageIdx) {
+        if (pageIdx < 0 || pageIdx >= fb.totalPages) return;
+        if (fb.renderedState[pageIdx] === 'rendered' || fb.renderedState[pageIdx] === 'rendering') return;
+
+        fb.renderedState[pageIdx] = 'rendering';
+        const page = fb.pdfPages[pageIdx];
+        const cv = fb.canvases[pageIdx];
+
+        const dpr = Math.min(window.devicePixelRatio || 1, 3);
+        const backingW = Math.round(fb.dispW * dpr);
+        const backingH = Math.round(fb.dispH * dpr);
+        if (cv.width !== backingW || cv.height !== backingH) {
+            cv.width = backingW;
+            cv.height = backingH;
+        }
+
+        const renderScale = backingW / page.getViewport({ scale: 1 }).width;
+        const vp = page.getViewport({ scale: renderScale });
+
+        try {
+            if (fb.renderTasks[pageIdx]) {
+                fb.renderTasks[pageIdx].cancel();
+            }
+            const task = page.render({
+                canvasContext: cv.getContext('2d', { willReadFrequently: true }),
+                viewport: vp
+            });
+            fb.renderTasks[pageIdx] = task;
+            await task.promise;
+            fb.renderedState[pageIdx] = 'rendered';
+
+            const loader = cv.parentElement ? cv.parentElement.querySelector('.fb-page-loader') : null;
+            if (loader) loader.style.display = 'none';
+        } catch (err) {
+            if (err?.name !== 'RenderingCancelledException') {
+                console.warn(`Flipbook Page ${pageIdx + 1} render error:`, err);
+                fb.renderedState[pageIdx] = 'idle';
+            }
+        }
+    }
+
+    function manageFlipbookMemory(currentPageIdx) {
+        const visibleRange = fb.doubleMode ? 2 : 1;
+        const startIdx = Math.max(0, currentPageIdx - 2);
+        const endIdx = Math.min(fb.totalPages - 1, currentPageIdx + (fb.doubleMode ? 3 : 2));
+
+        // 1. Render active and neighborhood pages
+        for (let i = startIdx; i <= endIdx; i++) {
+            renderFlipbookPage(i);
+        }
+
+        // 2. Unload pages outside active range to free GPU RAM
+        for (let i = 0; i < fb.totalPages; i++) {
+            if (i < startIdx || i > endIdx) {
+                if (fb.renderedState[i] === 'rendered') {
+                    if (fb.renderTasks[i]) {
+                        fb.renderTasks[i].cancel();
+                        fb.renderTasks[i] = null;
+                    }
+                    const cv = fb.canvases[i];
+                    if (cv) {
+                        cv.width = 0;
+                        cv.height = 0;
+                    }
+                    fb.renderedState[i] = 'idle';
+                    
+                    const loader = cv.parentElement ? cv.parentElement.querySelector('.fb-page-loader') : null;
+                    if (loader) loader.style.display = 'flex';
+                }
+            }
+        }
+    }
+
+    /* ---------- Window resize / rotation listener ---------- */
+    let fbResizeTimer;
+    window.addEventListener('resize', () => {
+        if (document.getElementById('fbOverlay').classList.contains('fb-hidden')) return;
+        if (!fb.ready) return;
+        clearTimeout(fbResizeTimer);
+        fbResizeTimer = setTimeout(async () => {
+            console.log('[Flipbook] Resize/Rotation detected, re-initializing layout...');
+            fb.ready = false;
+            resetBookElement();
+            await initFlipbook();
+        }, 250);
+    });
 
     /* ---------- INIT ---------- */
     async function initFlipbook() {
         const loadingEl  = document.getElementById('fbLoading');
         const progressEl = document.getElementById('fbProgressBar');
         const textEl     = document.getElementById('fbLoadingText');
-        const bookEl     = document.getElementById('fbBook');
+        const bookEl     = resetBookElement();
         const stageEl    = document.getElementById('fbStage');
 
         console.group('%c[Flipbook] initFlipbook()', 'color:#4f46e5;font-weight:bold');
-        console.log('[Flipbook] Viewport      :', window.innerWidth + '×' + window.innerHeight);
-        console.log('[Flipbook] devicePixelRatio:', window.devicePixelRatio);
-        console.log('[Flipbook] doubleMode    :', fb.doubleMode);
-        console.log('[Flipbook] overlay visible:', !document.getElementById('fbOverlay').classList.contains('fb-hidden'));
-        console.log('[Flipbook] stageEl offset :', stageEl.offsetWidth + '×' + stageEl.offsetHeight, '| client:', stageEl.clientWidth + '×' + stageEl.clientHeight);
-
         loadingEl.style.display = 'flex';
 
-        /* --- ensure PDF.js worker --- */
         if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
             pdfjsLib.GlobalWorkerOptions.workerSrc =
                 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
         }
 
-        /* --- load PDF --- */
         textEl.textContent = 'Loading document…';
-        const pdfDoc = await pdfjsLib.getDocument(VIEWER_CONFIG.pdfUrl).promise;
+        // Re-use the document: the main viewer has usually loaded it already
+        // (global `pdfDoc` from viewer.js), and re-inits (resize / layout
+        // toggle) previously downloaded the whole PDF again every time.
+        if (!fb.pdfDoc) {
+            fb.pdfDoc = (typeof window.getViewerPdfDoc === 'function' && window.getViewerPdfDoc())
+                || await pdfjsLib.getDocument({ url: VIEWER_CONFIG.pdfUrl, withCredentials: true }).promise;
+        }
+        const pdfDoc = fb.pdfDoc;
         fb.totalPages = pdfDoc.numPages;
-        console.log('[Flipbook] PDF loaded     :', fb.totalPages, 'pages');
 
-        /* --- measure first page for exact PDF aspect ratio --- */
         const pg1   = await pdfDoc.getPage(1);
         const vp1   = pg1.getViewport({ scale: 1 });
         const pageW = vp1.width;
         const pageH = vp1.height;
-        console.log('[Flipbook] PDF page size  :', pageW.toFixed(1) + '×' + pageH.toFixed(1), 'pt  aspect:', (pageW/pageH).toFixed(3));
 
-        /* --- compute display size from PDF dimensions + actual stage size ---
-         * Pre-show controls/thumbs (invisible) so the stage already has its
-         * final height when we measure — prevents the book being oversized. */
         const isMobile   = window.innerWidth <= 640;
-        if (isMobile) fb.doubleMode = false;
+        fb.doubleMode    = fb.preferDouble && !isMobile;
         const arrowPad   = isMobile ? 10 : 120;
         const ctrlEl     = document.getElementById('fbControls');
         const thumbBarEl = document.getElementById('fbThumbsBar');
         ctrlEl.style.cssText    = 'display:flex;visibility:hidden';
         thumbBarEl.style.cssText = 'display:block;visibility:hidden';
-        await new Promise(r => requestAnimationFrame(r));       // let browser reflow
+        await new Promise(r => requestAnimationFrame(r));
         const stageW = Math.max(100, stageEl.clientWidth  - arrowPad);
         const stageH = Math.max(100, stageEl.clientHeight - 8);
-        ctrlEl.style.cssText    = 'display:none';   // hide again until init completes
+        ctrlEl.style.cssText    = 'display:none';
         thumbBarEl.style.cssText = 'display:none';
-        console.log('[Flipbook] Stage measured :', stageW + '×' + stageH, '(isMobile=' + isMobile + ', arrowPad=' + arrowPad + ')');
 
-        // Auto-fallback: if double-page spread would fill less than 55% of stage height,
-        // switch to single-page — avoids large black bars on square/landscape PDFs
         if (!isMobile && fb.doubleMode) {
             const testScale = Math.min(stageW / (pageW * 2), stageH / pageH);
             const heightFill = (pageH * testScale) / stageH;
-            console.log('[Flipbook] Double-page height fill:', (heightFill * 100).toFixed(1) + '%', heightFill < 0.55 ? '→ switching to single-page' : '→ keeping double');
             if (heightFill < 0.55) fb.doubleMode = false;
         }
 
+        // Keep the toolbar label in sync with the layout actually used
+        const layoutLbl = document.querySelector('#fbLayoutBtn .fb-layout-label');
+        if (layoutLbl) layoutLbl.textContent = fb.doubleMode ? 'Double' : 'Single';
+
         const spread    = fb.doubleMode ? 2 : 1;
-        // Scale so the spread fills the stage, derived purely from PDF page size
         const scaleW    = stageW / (pageW * spread);
         const scaleH    = stageH / pageH;
         const dispScale = Math.min(scaleW, scaleH);
         const dispW     = Math.round(pageW  * dispScale);
         const dispH     = Math.round(pageH  * dispScale);
-        // Render at device-pixel-ratio resolution for crisp text on HiDPI screens
         const dpr         = Math.min(window.devicePixelRatio || 1, 3);
-        const renderScale = dispScale * dpr;
-        console.log('[Flipbook] Layout         :', 'spread=' + spread, 'scaleW=' + scaleW.toFixed(3), 'scaleH=' + scaleH.toFixed(3), '→ dispScale=' + dispScale.toFixed(3));
-        console.log('[Flipbook] Page dispSize  :', dispW + '×' + dispH, 'px  (spread total: ' + (dispW*spread) + '×' + dispH + ')');
-        console.log('[Flipbook] dpr=' + dpr, '→ renderScale=' + renderScale.toFixed(3), '  renderCanvas=' + Math.round(pageW*renderScale) + '×' + Math.round(pageH*renderScale));
 
-        /* --- render all pages --- */
         bookEl.innerHTML = '';
         fb.canvases = [];
+        fb.renderedState = [];
+        fb.renderTasks = [];
+        fb.pdfPages = [];
         const thumbsEl = document.getElementById('fbThumbs');
         thumbsEl.innerHTML = '';
 
-        for (let i = 1; i <= fb.totalPages; i++) {
-            textEl.textContent = `Rendering page ${i} of ${fb.totalPages}…`;
-            progressEl.style.width = (i / fb.totalPages * 100) + '%';
+        bookEl.style.width  = (dispW * spread) + 'px';
+        bookEl.style.height = dispH + 'px';
+        fb.zoom = 1.0; applyZoom();
+        fb.dispW = dispW; fb.dispH = dispH;
 
-            const page  = await pdfDoc.getPage(i);
-            const vp    = page.getViewport({ scale: renderScale });
-            const cv    = document.createElement('canvas');
-            cv.width    = vp.width;
-            cv.height   = vp.height;
-            await page.render({ canvasContext: cv.getContext('2d', { willReadFrequently: true }), viewport: vp }).promise;
+        for (let i = 1; i <= fb.totalPages; i++) {
+            textEl.textContent = `Preparing page shells… (${i}/${fb.totalPages})`;
+            progressEl.style.width = (i / fb.totalPages * 90 + 10) + '%';
+
+            const page = await pdfDoc.getPage(i);
+            fb.pdfPages.push(page);
+            fb.renderedState.push('idle');
+            fb.renderTasks.push(null);
+
+            const cv = document.createElement('canvas');
+            cv.width  = Math.round(dispW * dpr);
+            cv.height = Math.round(dispH * dpr);
+            cv.style.cssText = 'display:block;width:100%;height:100%;object-fit:contain;';
             fb.canvases.push(cv);
 
-            /* page div for StPageFlip */
             const div = document.createElement('div');
             div.className = 'fb-page' + (i === 1 || i === fb.totalPages ? ' fb-cover' : '');
-            div.style.cssText = `width:${dispW}px;height:${dispH}px;`;
-            const cvClone = document.createElement('canvas');
-            cvClone.width  = dispW; cvClone.height = dispH;
-            cvClone.getContext('2d').drawImage(cv, 0, 0, dispW, dispH);
-            div.appendChild(cvClone);
+            div.style.cssText = `width:${dispW}px;height:${dispH}px;position:relative;`;
+            
+            const loader = document.createElement('div');
+            loader.className = 'fb-page-loader';
+            loader.style.cssText = 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#1e293b;color:#94a3b8;font-size:0.8rem;z-index:1;';
+            loader.innerHTML = `<span>Loading Page ${i}…</span>`;
+            div.appendChild(loader);
+            
+            div.appendChild(cv);
             bookEl.appendChild(div);
 
-            /* thumbnail */
             const tW = 52, tH = Math.round(pageH / pageW * tW);
             const tCv = document.createElement('canvas');
-            tCv.width = tW; tCv.height = tH;
-            tCv.getContext('2d').drawImage(cv, 0, 0, tW, tH);
+            tCv.width = tW * dpr; tCv.height = tH * dpr;
+            tCv.style.width = tW + 'px'; tCv.style.height = tH + 'px';
             const tDiv = document.createElement('div');
             tDiv.className = 'fb-thumb-item' + (i === 1 ? ' fb-thumb-active' : '');
             tDiv.title = `Page ${i}`;
@@ -870,18 +1052,16 @@ const VIEWER_CONFIG = {
                 }
             });
             thumbsEl.appendChild(tDiv);
-        }
 
-        /* --- destroy previous instance --- */
-        if (fb.instance) {
-            try { fb.instance.destroy(); } catch (_) {}
-            fb.instance = null;
+            (async () => {
+                try {
+                    const vp = page.getViewport({ scale: (tW * dpr) / pageW });
+                    await page.render({ canvasContext: tCv.getContext('2d'), viewport: vp }).promise;
+                } catch (_) {}
+            })();
         }
-        fb.zoom = 1.0; applyZoom();
-        fb.dispW = dispW; fb.dispH = dispH;
 
         if (fb.doubleMode) {
-            /* ── Double-page mode: StPageFlip ── */
             const pf = new St.PageFlip(bookEl, {
                 width:               dispW,
                 height:              dispH,
@@ -891,11 +1071,11 @@ const VIEWER_CONFIG = {
                 minHeight:           200,
                 maxHeight:           dispH,
                 drawShadow:          true,
-                flippingTime:        700,
+                flippingTime:        600,
                 usePortrait:         false,
                 startZIndex:         0,
                 autoSize:            false,
-                maxShadowOpacity:    0.5,
+                maxShadowOpacity:    0.35,
                 showCover:           true,
                 mobileScrollSupport: true,
                 clickEventForward:   true,
@@ -909,7 +1089,6 @@ const VIEWER_CONFIG = {
             fb.instance = pf;
 
         } else {
-            /* ── Single-page mode: custom CSS-3D flipper ── */
             bookEl.innerHTML = '';
             fb.singlePageIdx = 0;
 
@@ -918,28 +1097,34 @@ const VIEWER_CONFIG = {
             singleEl.style.cssText = [
                 `width:${dispW}px`, `height:${dispH}px`,
                 'overflow:hidden', 'position:relative',
-                'box-shadow:0 20px 60px rgba(0,0,0,.7)',
+                'box-shadow:0 30px 70px rgba(0,0,0,.65)',
                 'transform-style:preserve-3d',
-                'border-radius:2px',
+                'border-radius:6px',
+                'background:#fff',
             ].join(';');
             bookEl.appendChild(singleEl);
 
             function renderSinglePage(idx, dir) {
                 fb.singlePageIdx = idx;
-                const cv    = fb.canvases[idx];
-                const cvEl  = document.createElement('canvas');
-                cvEl.width  = dispW; cvEl.height = dispH;
-                cvEl.style.cssText = 'display:block;width:100%;height:100%;';
-                cvEl.getContext('2d').drawImage(cv, 0, 0, dispW, dispH);
+                const cv = fb.canvases[idx];
+                cv.style.cssText = 'display:block;width:100%;height:100%;object-fit:contain;';
 
                 if (dir) {
-                    /* fly in from edge */
                     const fromX = dir === 'next' ? '60px' : '-60px';
-                    singleEl.style.cssText += `;transition:none;opacity:0;transform:perspective(1400px) translateX(${fromX}) rotateY(${dir === 'next' ? 18 : -18}deg)`;
+                    const rotateVal = dir === 'next' ? 12 : -12;
+                    singleEl.style.cssText += `;transition:none;opacity:0;transform:perspective(1400px) translateX(${fromX}) rotateY(${rotateVal}deg)`;
                     singleEl.innerHTML = '';
-                    singleEl.appendChild(cvEl);
+                    
+                    if (fb.renderedState[idx] !== 'rendered') {
+                        const loader = document.createElement('div');
+                        loader.className = 'fb-page-loader';
+                        loader.style.cssText = 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#1e293b;color:#94a3b8;font-size:0.8rem;z-index:1;';
+                        loader.innerHTML = `<span>Loading Page ${idx + 1}…</span>`;
+                        singleEl.appendChild(loader);
+                    }
+                    singleEl.appendChild(cv);
                     requestAnimationFrame(() => requestAnimationFrame(() => {
-                        singleEl.style.transition = 'opacity .32s ease, transform .38s cubic-bezier(.22,1,.36,1)';
+                        singleEl.style.transition = 'opacity .28s ease, transform .32s cubic-bezier(.22,1,.36,1)';
                         singleEl.style.opacity    = '1';
                         singleEl.style.transform  = 'perspective(1400px) translateX(0) rotateY(0deg)';
                     }));
@@ -948,30 +1133,50 @@ const VIEWER_CONFIG = {
                     singleEl.style.opacity    = '1';
                     singleEl.style.transform  = 'none';
                     singleEl.innerHTML        = '';
-                    singleEl.appendChild(cvEl);
+                    if (fb.renderedState[idx] !== 'rendered') {
+                        const loader = document.createElement('div');
+                        loader.className = 'fb-page-loader';
+                        loader.style.cssText = 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#1e293b;color:#94a3b8;font-size:0.8rem;z-index:1;';
+                        loader.innerHTML = `<span>Loading Page ${idx + 1}…</span>`;
+                        singleEl.appendChild(loader);
+                    }
+                    singleEl.appendChild(cv);
                 }
                 updateUI(idx);
                 playFlipSound();
             }
 
             fb.singleFlipTo = renderSinglePage;
+
+            let touchStartX = 0;
+            let touchStartY = 0;
+            singleEl.addEventListener('touchstart', (e) => {
+                touchStartX = e.touches[0].clientX;
+                touchStartY = e.touches[0].clientY;
+            }, { passive: true });
+            
+            singleEl.addEventListener('touchend', (e) => {
+                const touchEndX = e.changedTouches[0].clientX;
+                const touchEndY = e.changedTouches[0].clientY;
+                const diffX = touchEndX - touchStartX;
+                const diffY = touchEndY - touchStartY;
+                if (Math.abs(diffX) > 40 && Math.abs(diffY) < 60) {
+                    if (diffX < 0) {
+                        fbFlipNext();
+                    } else {
+                        fbFlipPrev();
+                    }
+                }
+            }, { passive: true });
+
             renderSinglePage(0, null);
         }
 
         fb.ready = true;
-
-        /* --- show UI --- */
         loadingEl.style.display  = 'none';
         document.getElementById('fbControls').style.display  = 'flex';
         document.getElementById('fbThumbsBar').style.display = 'block';
         updateUI(0);
-
-        // Final state after controls appear
-        await new Promise(r => requestAnimationFrame(r));
-        console.log('[Flipbook] Final stageEl  :', stageEl.clientWidth + '×' + stageEl.clientHeight, '(after controls shown)');
-        console.log('[Flipbook] bookEl size    :', bookEl.offsetWidth + '×' + bookEl.offsetHeight);
-        console.log('[Flipbook] fbBookWrap     :', document.getElementById('fbBookWrap').offsetWidth + '×' + document.getElementById('fbBookWrap').offsetHeight);
-        console.log('%c[Flipbook] Init complete ✓', 'color:#22c55e;font-weight:bold');
         console.groupEnd();
     }
 }());

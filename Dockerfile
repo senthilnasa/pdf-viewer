@@ -41,8 +41,13 @@ COPY docker/nginx/apache.conf /etc/apache2/sites-available/000-default.conf
 WORKDIR /var/www/html
 COPY . .
 
-# Remove installer from production image (copy it back manually if needed)
-# RUN rm -f install.php
+# --- PHP dependencies (PHPMailer) ---
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+RUN composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader \
+    && rm -f /usr/bin/composer
+
+# install.php stays in the image: the first-run admin account is created
+# through it. It locks itself (config/install.lock) after a successful install.
 
 # --- File permissions ---
 RUN chown -R www-data:www-data /var/www/html \

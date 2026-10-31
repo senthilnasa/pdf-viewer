@@ -50,15 +50,17 @@ ErrorDocument 500 /errors/404.php
 # ----------------------------------------------------------
 # Deny direct access to sensitive directories/files
 # ----------------------------------------------------------
-<FilesMatch "^(config|includes|uploads)/.*">
-    Order allow,deny
-    Deny from all
-</FilesMatch>
-
-# Block direct access to error pages directory
-<FilesMatch "^\.">
-    Order allow,deny
-    Deny from all
+# (FilesMatch only sees file names, never directories — directory rules live
+#  in the mod_rewrite block below.)
+# Dot-files (.htaccess, .user.ini, .env*) and schema / lock / shell files
+<FilesMatch "(^\.|\.(sql|lock|ini|log|sh|md|example|dist)$)">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
 </FilesMatch>
 
 # Block direct access to config directory
@@ -73,12 +75,12 @@ ErrorDocument 500 /errors/404.php
     # RewriteCond %{HTTPS} off
     # RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [R=301,L]
 
-    # Block access to config and includes
-    RewriteRule ^config/ - [F,L]
-    RewriteRule ^includes/ - [F,L]
+    # Block access to config, includes, docker files and VCS metadata
+    RewriteRule ^(config|includes|docker|\.git)(/|$) - [F,L]
 
-    # Protect uploads — only allow serving PDFs through viewer
-    RewriteRule ^uploads/.*\.php$ - [F,L]
+    # Protect uploads — PDFs are only served through api/serve-pdf.php
+    # (uploads/.htaccess additionally whitelists image files only)
+    RewriteRule ^uploads/.*\.(php\d?|phtml|phar|pdf)$ - [F,L,NC]
 
     # Block direct browsing of error pages (skip for internal Apache error redirects)
     RewriteCond %{ENV:REDIRECT_STATUS} ^$

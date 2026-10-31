@@ -25,20 +25,21 @@ try {
     exit;
 }
 
-// Demo mode must be active
-if (!getSetting('demo_mode', false)) {
-    http_response_code(403);
-    echo json_encode(['success' => false, 'message' => 'Demo mode is not active.']);
-    exit;
-}
-
-// Validate token
+// Validate token FIRST (don't disclose demo-mode state to unauthenticated callers)
 $expectedToken = getSetting('demo_cron_token', '');
-$providedToken = trim($_GET['token'] ?? $_POST['token'] ?? '');
+$providedToken = $_GET['token'] ?? $_POST['token'] ?? '';
+$providedToken = is_string($providedToken) ? trim($providedToken) : '';
 
 if (!$expectedToken || !hash_equals($expectedToken, $providedToken)) {
     http_response_code(401);
     echo json_encode(['success' => false, 'message' => 'Invalid or missing cron token.']);
+    exit;
+}
+
+// Demo mode must be active
+if (!getSetting('demo_mode', false)) {
+    http_response_code(403);
+    echo json_encode(['success' => false, 'message' => 'Demo mode is not active.']);
     exit;
 }
 

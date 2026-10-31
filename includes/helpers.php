@@ -10,11 +10,34 @@
 
 function bootstrap(): array
 {
+    // Auto-load all required classes if not already loaded
+    if (!class_exists('EmailProvider')) {
+        require_once ROOT . '/includes/EmailProvider.php';
+    }
+    if (!class_exists('EmailTemplate')) {
+        require_once ROOT . '/includes/EmailTemplate.php';
+    }
+    if (!class_exists('AuditLog')) {
+        require_once ROOT . '/includes/AuditLog.php';
+    }
+    if (!class_exists('Notification')) {
+        require_once ROOT . '/includes/Notification.php';
+    }
+    if (!class_exists('StorageFactory')) {
+        require_once ROOT . '/includes/Storage.php';
+    }
+    if (!class_exists('Scheduler')) {
+        require_once ROOT . '/includes/Scheduler.php';
+    }
+    if (!class_exists('Category')) {
+        require_once ROOT . '/includes/Category.php';
+    }
+
     $appConfig = ROOT . '/config/app.php';
     $base      = rtrim(dirname($_SERVER['SCRIPT_NAME'] ?? ''), '/');
     $installer = $base . '/install.php';
 
-    if (!file_exists($appConfig)) {
+    if (!file_exists($appConfig) || !file_exists(ROOT . '/config/database.php')) {
         header('Location: ' . $installer);
         exit;
     }
@@ -97,13 +120,74 @@ function csrfField(): string
     return '<input type="hidden" name="csrf_token" value="' . e($token) . '">';
 }
 
+function isAjaxRequest(): bool
+{
+    return strtolower($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') === 'xmlhttprequest';
+}
+
+/** Parse php.ini shorthand ("8M", "1G") into bytes. 0 = unlimited. */
+function iniBytes(string $value): int
+{
+    $value = trim($value);
+    if ($value === '') return 0;
+    $num  = (int)$value;
+    return match (strtolower(substr($value, -1))) {
+        'g'     => $num * 1024 ** 3,
+        'm'     => $num * 1024 ** 2,
+        'k'     => $num * 1024,
+        default => $num,
+    };
+}
+
+/**
+ * Largest upload this server will actually accept: the smallest of the app
+ * limit, upload_max_filesize and post_max_size (minus multipart overhead).
+ */
+function effectiveUploadLimit(int $appLimit): int
+{
+    $limits = [$appLimit];
+    foreach (['upload_max_filesize', 'post_max_size'] as $ini) {
+        $b = iniBytes((string)ini_get($ini));
+        if ($b > 0) $limits[] = $ini === 'post_max_size' ? max(0, $b - 64 * 1024) : $b;
+    }
+    return (int)min(array_filter($limits, fn($v) => $v > 0) ?: [$appLimit]);
+}
+
+/** Send an error as JSON for AJAX callers, plain text otherwise, and stop. */
+function requestError(int $code, string $message): never
+{
+    http_response_code($code);
+    if (isAjaxRequest()) {
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode(['success' => false, 'message' => $message]);
+    } else {
+        header('Content-Type: text/plain; charset=utf-8');
+        echo $message;
+    }
+    exit;
+}
+
 function verifyCsrf(): void
 {
     global $auth;
+
+    // When a request body exceeds post_max_size PHP silently discards ALL of
+    // it ($_POST and $_FILES are empty). That used to surface as a misleading
+    // "403 Invalid CSRF token" on large PDF uploads. Report the real cause.
+    $contentLength = (int)($_SERVER['CONTENT_LENGTH'] ?? 0);
+    $postMax       = iniBytes((string)ini_get('post_max_size'));
+    if (isPost() && empty($_POST) && empty($_FILES) && $postMax > 0 && $contentLength > $postMax) {
+        requestError(413, sprintf(
+            'The upload is too large for this server (%s MB sent, the PHP post_max_size limit is %s). '
+            . 'Upload a smaller file or raise upload_max_filesize / post_max_size.',
+            number_format($contentLength / 1048576, 1),
+            ini_get('post_max_size')
+        ));
+    }
+
     $token = post('csrf_token') ?: ($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '');
-    if (!$auth->validateCsrfToken($token)) {
-        http_response_code(403);
-        die('Invalid CSRF token.');
+    if (!is_string($token) || !$auth->validateCsrfToken($token)) {
+        requestError(403, 'Your session has expired or the form is out of date. Please reload the page and try again.');
     }
 }
 
@@ -126,34 +210,84 @@ function paginate(int $total, int $perPage, int $currentPage, string $urlPattern
 }
 
 // -------------------------------------------------------------------------
+// Email provider config helper
+// -------------------------------------------------------------------------
+
+/**
+ * Build the config array EmailManager/SMTPEmailProvider expect, sourced
+ * from DB-backed settings (configurable via Settings → Email / SMTP).
+ */
+function emailProviderConfig(): array
+{
+    return [
+        'email_provider'  => getSetting('email_provider', 'smtp'),
+        // ?: so an empty stored value (the default seed) still falls back
+        'from_email'      => getSetting('email_from', '') ?: 'noreply@example.com',
+        'from_name'       => getSetting('email_from_name', '') ?: getSetting('site_name', 'PDF Viewer'),
+        'smtp_host'       => getSetting('smtp_host', ''),
+        'smtp_port'       => (int)getSetting('smtp_port', 587),
+        'smtp_username'   => getSetting('smtp_username', ''),
+        'smtp_password'   => getSetting('smtp_password', ''),
+        'smtp_encryption' => getSetting('smtp_encryption', 'tls'),
+        'log_file'        => sys_get_temp_dir() . '/pdfviewer-emails.log',
+    ];
+}
+
+// -------------------------------------------------------------------------
 // Settings DB helpers
 // -------------------------------------------------------------------------
 
-function getSetting(string $key, mixed $default = null): mixed
+/**
+ * Per-request settings cache shared by getSetting()/setSetting() so a value
+ * written during the request is immediately visible to later reads (previously
+ * getSetting() kept a private static cache that setSetting() never updated, so
+ * pages re-rendered after a save showed the old values).
+ */
+function &settingsCache(): array
 {
     static $cache = [];
+    return $cache;
+}
+
+function getSetting(string $key, mixed $default = null): mixed
+{
+    $cache = &settingsCache();
     if (!array_key_exists($key, $cache)) {
         $row = Database::fetchOne('SELECT value, type FROM settings WHERE `key` = ?', [$key]);
         if ($row === false) {
-            $cache[$key] = $default;
-        } else {
-            $cache[$key] = castSetting($row['value'], $row['type']);
+            // Not stored — return the caller's default without caching it, so
+            // different callers can supply different defaults for the same key.
+            return $default;
         }
+        $cache[$key] = castSetting($row['value'], $row['type']);
     }
     return $cache[$key];
 }
 
 function setSetting(string $key, mixed $value, string $type = 'string'): void
 {
+    if (is_bool($value)) {
+        $value = $value ? '1' : '0';
+    }
     $strVal = is_array($value) || is_object($value) ? json_encode($value) : (string)$value;
     Database::query(
         'INSERT INTO settings (`key`, `value`, `type`) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE `value` = ?, `type` = ?',
         [$key, $strVal, $type, $strVal, $type]
     );
+    $cache = &settingsCache();
+    $cache[$key] = castSetting($strVal, $type);
 }
 
-function castSetting(string $value, string $type): mixed
+/** Drop all cached settings (after bulk writes such as a demo reset). */
+function clearSettingsCache(): void
 {
+    $cache = &settingsCache();
+    $cache = [];
+}
+
+function castSetting(?string $value, string $type): mixed
+{
+    $value ??= '';
     return match ($type) {
         'boolean' => (bool)(int)$value,
         'integer' => (int)$value,
@@ -200,13 +334,16 @@ function demoResetSettings(): void
         $snapshot = json_decode($snapshotJson, true);
         if (!is_array($snapshot)) return;
 
-        foreach ($snapshot as $key => $entry) {
-            Database::query(
-                'INSERT INTO settings (`key`, `value`, `type`) VALUES (?, ?, ?)
-                 ON DUPLICATE KEY UPDATE `value` = ?, `type` = ?',
-                [$key, $entry['value'], $entry['type'], $entry['value'], $entry['type']]
-            );
-        }
+        // One transaction: visitors never observe a half-restored settings set
+        Database::transaction(function () use ($snapshot) {
+            foreach ($snapshot as $key => $entry) {
+                Database::query(
+                    'INSERT INTO settings (`key`, `value`, `type`) VALUES (?, ?, ?)
+                     ON DUPLICATE KEY UPDATE `value` = ?, `type` = ?',
+                    [$key, $entry['value'], $entry['type'], $entry['value'], $entry['type']]
+                );
+            }
+        });
 
         // Record reset time (direct query to avoid cache issues)
         $ts = (string)time();
@@ -215,6 +352,7 @@ function demoResetSettings(): void
              ON DUPLICATE KEY UPDATE `value` = ?, `type` = "integer"',
             [$ts, $ts]
         );
+        clearSettingsCache();
     } catch (Throwable $_) {}
 }
 
@@ -230,6 +368,7 @@ function adminNav(string $current): string
         'analytics'  => ['Analytics',    'admin/analytics.php','M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z'],
         'reports'    => ['Reports',      'admin/reports.php',  'M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z'],
         'team'       => ['Team',         'admin/team.php',     'M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z'],
+        'audit'      => ['Audit Logs',   'admin/audit-logs.php','M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z'],
         'settings'   => ['Settings',     'admin/settings.php', 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z'],
     ];
 
@@ -271,6 +410,19 @@ function formatDate(string $datetime, string $format = 'M j, Y'): string
 // CSV export
 // -------------------------------------------------------------------------
 
+/**
+ * Neutralise spreadsheet formula injection: visitor-controlled values such as
+ * the User-Agent or Referer header could otherwise start with =, +, - or @ and
+ * be executed as a formula when the exported CSV is opened in Excel/Sheets.
+ */
+function csvSafeCell(mixed $value): mixed
+{
+    if (is_string($value) && $value !== '' && in_array($value[0], ['=', '+', '-', '@', "\t", "\r"], true)) {
+        return "'" . $value;
+    }
+    return $value;
+}
+
 function exportCsv(array $rows, string $filename): never
 {
     header('Content-Type: text/csv; charset=utf-8');
@@ -281,7 +433,7 @@ function exportCsv(array $rows, string $filename): never
     if (!empty($rows)) {
         fputcsv($out, array_keys($rows[0]));
         foreach ($rows as $row) {
-            fputcsv($out, $row);
+            fputcsv($out, array_map('csvSafeCell', $row));
         }
     }
     fclose($out);

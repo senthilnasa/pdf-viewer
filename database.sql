@@ -13,6 +13,8 @@ CREATE TABLE IF NOT EXISTS `users` (
     `id`              INT UNSIGNED NOT NULL AUTO_INCREMENT,
     `name`            VARCHAR(120) NOT NULL,
     `email`           VARCHAR(191) NOT NULL,
+    `email_verified`    TINYINT(1) NOT NULL DEFAULT 0,
+    `email_verified_at` DATETIME DEFAULT NULL,
     `password`        VARCHAR(255) DEFAULT NULL COMMENT 'NULL for OAuth-only accounts',
     `role`            ENUM('admin','editor','viewer') NOT NULL DEFAULT 'viewer',
     `auth_provider`   ENUM('local','google') NOT NULL DEFAULT 'local',
@@ -20,6 +22,7 @@ CREATE TABLE IF NOT EXISTS `users` (
     `avatar`          VARCHAR(255) DEFAULT NULL,
     `status`          ENUM('active','inactive','invited') NOT NULL DEFAULT 'active',
     `invite_token`    VARCHAR(64) DEFAULT NULL,
+    `invite_expires`  DATETIME DEFAULT NULL,
     `reset_token`     VARCHAR(64) DEFAULT NULL,
     `reset_expires`   DATETIME DEFAULT NULL,
     `last_login`      DATETIME DEFAULT NULL,
@@ -32,6 +35,23 @@ CREATE TABLE IF NOT EXISTS `users` (
     UNIQUE KEY `uq_google_id` (`google_id`),
     KEY `idx_invite_token` (`invite_token`),
     KEY `idx_reset_token` (`reset_token`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- --------------------------------------------------------
+-- Categories Table (unlimited parent/child hierarchy via self-reference)
+-- --------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `categories` (
+    `id`         INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `parent_id`  INT UNSIGNED DEFAULT NULL COMMENT 'NULL = top-level parent category',
+    `name`       VARCHAR(150) NOT NULL,
+    `slug`       VARCHAR(160) NOT NULL,
+    `sort_order` INT UNSIGNED NOT NULL DEFAULT 0,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uq_slug` (`slug`),
+    KEY `idx_parent_id` (`parent_id`),
+    CONSTRAINT `fk_cat_parent` FOREIGN KEY (`parent_id`) REFERENCES `categories` (`id`) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- --------------------------------------------------------
@@ -51,6 +71,8 @@ CREATE TABLE IF NOT EXISTS `pdf_documents` (
     `meta_desc`      VARCHAR(500) DEFAULT NULL,
     `thumbnail`      VARCHAR(500) DEFAULT NULL,
     `enable_download`TINYINT(1) NOT NULL DEFAULT 1,
+    `show_in_catalog`TINYINT(1) NOT NULL DEFAULT 1,
+    `category_id`    INT UNSIGNED DEFAULT NULL,
     `created_by`     INT UNSIGNED NOT NULL,
     `created_at`     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `updated_at`     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -58,7 +80,10 @@ CREATE TABLE IF NOT EXISTS `pdf_documents` (
     UNIQUE KEY `uq_slug` (`slug`),
     KEY `idx_status_visibility` (`status`, `visibility`),
     KEY `idx_created_by` (`created_by`),
-    CONSTRAINT `fk_pdf_user` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE RESTRICT
+    KEY `idx_category_id` (`category_id`),
+    KEY `idx_catalog` (`show_in_catalog`, `status`, `visibility`),
+    CONSTRAINT `fk_pdf_user` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE RESTRICT,
+    CONSTRAINT `fk_pdf_category` FOREIGN KEY (`category_id`) REFERENCES `categories` (`id`) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- --------------------------------------------------------
@@ -143,6 +168,140 @@ CREATE TABLE IF NOT EXISTS `login_attempts` (
     KEY `idx_email_time` (`email`, `attempted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- --------------------------------------------------------
+-- Audit Logs Table
+-- --------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `audit_logs` (
+    `id`             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `action`         VARCHAR(50) NOT NULL,
+    `user_id`        INT UNSIGNED DEFAULT NULL,
+    `resource_type`  VARCHAR(50) DEFAULT NULL,
+    `resource_id`    INT UNSIGNED DEFAULT NULL,
+    `metadata`       JSON DEFAULT NULL,
+    `ip_address`     VARCHAR(45) NOT NULL,
+    `user_agent`     VARCHAR(512) DEFAULT NULL,
+    `logged_at`      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    KEY `idx_action` (`action`),
+    KEY `idx_user_id` (`user_id`),
+    KEY `idx_logged_at` (`logged_at`),
+    KEY `idx_resource` (`resource_type`, `resource_id`),
+    CONSTRAINT `fk_audit_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- --------------------------------------------------------
+-- User Sessions Table
+-- --------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `user_sessions` (
+    `id`              INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `user_id`         INT UNSIGNED NOT NULL,
+    `session_token`   VARCHAR(255) NOT NULL,
+    `ip_address`      VARCHAR(45) NOT NULL,
+    `user_agent`      VARCHAR(512) DEFAULT NULL,
+    `last_activity`   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `created_at`      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `expires_at`      DATETIME NOT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uq_token` (`session_token`),
+    KEY `idx_user_id` (`user_id`),
+    KEY `idx_expires_at` (`expires_at`),
+    CONSTRAINT `fk_session_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- --------------------------------------------------------
+-- Email Verification Tokens
+-- --------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `email_verifications` (
+    `id`              INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `user_id`         INT UNSIGNED NOT NULL,
+    `email`           VARCHAR(191) NOT NULL,
+    `token`           VARCHAR(64) NOT NULL,
+    `verified_at`     DATETIME DEFAULT NULL,
+    `expires_at`      DATETIME NOT NULL,
+    `created_at`      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uq_token` (`token`),
+    KEY `idx_user_id` (`user_id`),
+    KEY `idx_email` (`email`),
+    CONSTRAINT `fk_verify_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- --------------------------------------------------------
+-- In-App Notifications
+-- --------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `notifications` (
+    `id`              BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `user_id`         INT UNSIGNED NOT NULL,
+    `type`            VARCHAR(50) NOT NULL,
+    `title`           VARCHAR(255) NOT NULL,
+    `message`         TEXT NOT NULL,
+    `action_url`      VARCHAR(500) DEFAULT NULL,
+    `read_at`         DATETIME DEFAULT NULL,
+    `created_at`      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `expires_at`      DATETIME DEFAULT NULL,
+    PRIMARY KEY (`id`),
+    KEY `idx_user_id` (`user_id`),
+    KEY `idx_read_at` (`read_at`),
+    KEY `idx_created_at` (`created_at`),
+    CONSTRAINT `fk_notif_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- --------------------------------------------------------
+-- Email Queue
+-- --------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `email_queue` (
+    `id`              BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `to_email`        VARCHAR(191) NOT NULL,
+    `subject`         VARCHAR(255) NOT NULL,
+    `html_body`       LONGTEXT NOT NULL,
+    `plain_body`      LONGTEXT,
+    `metadata`        JSON DEFAULT NULL,
+    `status`          ENUM('pending', 'sent', 'failed') NOT NULL DEFAULT 'pending',
+    `attempts`        TINYINT UNSIGNED NOT NULL DEFAULT 0,
+    `last_attempt_at` DATETIME DEFAULT NULL,
+    `error_message`   TEXT DEFAULT NULL,
+    `created_at`      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `sent_at`         DATETIME DEFAULT NULL,
+    PRIMARY KEY (`id`),
+    KEY `idx_status` (`status`),
+    KEY `idx_created_at` (`created_at`),
+    KEY `idx_next_retry` (`status`, `last_attempt_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- --------------------------------------------------------
+-- User Preferences
+-- --------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `user_preferences` (
+    `id`              INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `user_id`         INT UNSIGNED NOT NULL,
+    `key`             VARCHAR(100) NOT NULL,
+    `value`           TEXT DEFAULT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uq_user_key` (`user_id`, `key`),
+    CONSTRAINT `fk_pref_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- --------------------------------------------------------
+-- Scheduled Tasks Table
+-- --------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `scheduled_tasks` (
+    `id`            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `task_name`     VARCHAR(100) NOT NULL,
+    `payload`       JSON DEFAULT NULL,
+    `status`        ENUM('pending', 'running', 'completed', 'failed') NOT NULL DEFAULT 'pending',
+    `result`        JSON DEFAULT NULL,
+    `error`         TEXT DEFAULT NULL,
+    `scheduled_for` DATETIME DEFAULT NULL,
+    `created_at`    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `started_at`    DATETIME DEFAULT NULL,
+    `completed_at`  DATETIME DEFAULT NULL,
+    `failed_at`     DATETIME DEFAULT NULL,
+    PRIMARY KEY (`id`),
+    KEY `idx_status` (`status`),
+    KEY `idx_scheduled` (`status`, `scheduled_for`),
+    KEY `idx_created_at` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 SET FOREIGN_KEY_CHECKS = 1;
 
 -- --------------------------------------------------------
@@ -160,5 +319,14 @@ INSERT INTO `settings` (`key`, `value`, `type`) VALUES
 ('google_client_secret','',             'string'),
 ('google_allowed_domains','[]',         'json'),
 ('cloudflare_token',    '',             'string'),
-('demo_mode',           '0',            'boolean')
-ON DUPLICATE KEY UPDATE `value` = VALUES(`value`);
+('demo_mode',           '0',            'boolean'),
+('email_provider',      'smtp',         'string'),
+('email_from',          '',             'string'),
+('email_from_name',     '',             'string'),
+('smtp_host',           '',             'string'),
+('smtp_port',           '587',          'integer'),
+('smtp_username',       '',             'string'),
+('smtp_password',       '',             'string'),
+('smtp_encryption',     'tls',          'string')
+-- Keep existing values: re-running the schema must never wipe saved settings
+ON DUPLICATE KEY UPDATE `value` = `value`;

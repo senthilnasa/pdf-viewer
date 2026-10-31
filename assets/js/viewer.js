@@ -12,6 +12,9 @@ pdfjsLib.GlobalWorkerOptions.workerSrc =
 
 const cfg = VIEWER_CONFIG;
 
+// Lets the flipbook re-use the already-loaded document instead of fetching it again
+window.getViewerPdfDoc = () => pdfDoc;
+
 // State
 let pdfDoc        = null;
 let currentPage   = 1;
@@ -25,6 +28,8 @@ let thumbsVisible  = true;
 let searchResults  = [];
 let searchIndex    = 0;
 let pageViewLog   = new Set();
+let pageObserver  = null;   // IntersectionObserver for lazy page rendering
+let searchSeq     = 0;      // guards against out-of-order search results
 
 // DOM references
 const container      = document.getElementById('pdfContainer');
@@ -93,6 +98,9 @@ async function loadPDF() {
 // ====================================================================
 
 function buildPlaceholders() {
+    // Disconnect the previous observer — a new one is created on every
+    // zoom/rotate/resize and the old ones kept firing on detached nodes.
+    if (pageObserver) pageObserver.disconnect();
     container.innerHTML = '';
     pageCache = {};
 
@@ -109,7 +117,7 @@ function buildPlaceholders() {
     }
 
     // Intersection observer for lazy loading
-    const observer = new IntersectionObserver((entries) => {
+    const observer = pageObserver = new IntersectionObserver((entries) => {
         entries.forEach(entry => {
             if (entry.isIntersecting) {
                 const page = parseInt(entry.target.dataset.page, 10);
@@ -188,10 +196,21 @@ function computeScale(page, scaleValue) {
 
 // Re-render all cached pages (after zoom/rotate change)
 function rerenderAll() {
+    // Cancel in-flight renders instead of just forgetting about them
+    Object.values(renderTasks).forEach(t => { try { t && t.cancel(); } catch (_) {} });
     pageCache = {};
     renderTasks = {};
+    const keepPage = currentPage;
     buildPlaceholders();
-    renderPage(currentPage);
+    // Keep the reader on the same page: rebuilding the placeholders reset the
+    // layout, so the viewport jumped and the scroll handler then reported the
+    // wrong current page.
+    renderPage(keepPage).then(() => {
+        const wrapper = document.getElementById(`page-wrapper-${keepPage}`);
+        if (wrapper) wrapper.scrollIntoView({ block: 'start' });
+        currentPage = keepPage;
+        pageNumInput.value = keepPage;
+    });
 }
 
 // ====================================================================
@@ -298,20 +317,27 @@ function onScroll() {
 // ====================================================================
 
 async function performSearch(query) {
+    const seq = ++searchSeq;
+    query = (query || '').trim();
     if (!pdfDoc || !query) {
+        searchResults = [];
         searchMatches.textContent = '';
         return;
     }
 
-    searchResults = [];
+    searchMatches.textContent = 'Searching…';
+    const results = [];
+    const needle = query.toLowerCase();
     for (let i = 1; i <= totalPages; i++) {
         const page = await pdfDoc.getPage(i);
         const content = await page.getTextContent();
+        if (seq !== searchSeq) return; // a newer search started — drop this one
         const text = content.items.map(t => t.str).join(' ');
-        if (text.toLowerCase().includes(query.toLowerCase())) {
-            searchResults.push(i);
+        if (text.toLowerCase().includes(needle)) {
+            results.push(i);
         }
     }
+    searchResults = results;
 
     searchMatches.textContent = searchResults.length
         ? `${searchResults.length} page(s) with match`
@@ -338,10 +364,16 @@ function toggleSharePanel() {
 function copyShareUrl() {
     const input = document.getElementById('shareUrl');
     if (!input) return;
-    input.select();
-    document.execCommand('copy');
     const btn = document.querySelector('.share-url-row button');
-    if (btn) { btn.textContent = 'Copied!'; setTimeout(() => btn.textContent = 'Copy', 2000); }
+    const done = () => { if (btn) { btn.textContent = 'Copied!'; setTimeout(() => btn.textContent = 'Copy', 2000); } };
+    // execCommand('copy') is deprecated; use the Clipboard API when available
+    if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(input.value).then(done).catch(() => { input.select(); document.execCommand('copy'); done(); });
+    } else {
+        input.select();
+        document.execCommand('copy');
+        done();
+    }
 }
 
 // ====================================================================
@@ -384,24 +416,30 @@ document.addEventListener('DOMContentLoaded', () => {
     // Zoom
     document.getElementById('zoomSelect')?.addEventListener('change', (e) => {
         currentScale = e.target.value;
-        pageCache = {};
-        renderTasks = {};
-        buildPlaceholders();
-        renderPage(currentPage);
+        rerenderAll();
     });
 
-    document.getElementById('zoomIn')?.addEventListener('click', () => {
+    // Numeric scale currently in effect (resolves "page-width" etc. so +/-
+    // step from what the user actually sees, not from a fixed 100%).
+    async function effectiveScale() {
+        const n = parseFloat(currentScale);
+        if (!isNaN(n)) return n;
+        if (!pdfDoc) return 1;
+        try { return computeScale(await pdfDoc.getPage(currentPage), currentScale); } catch (_) { return 1; }
+    }
+
+    document.getElementById('zoomIn')?.addEventListener('click', async () => {
         const steps = [0.5, 0.75, 1, 1.25, 1.5, 2, 3];
-        const cur = parseFloat(currentScale) || 1;
+        const cur = await effectiveScale();
         const next = steps.find(s => s > cur) || steps[steps.length - 1];
         currentScale = String(next);
         setZoomSelect(currentScale);
         rerenderAll();
     });
 
-    document.getElementById('zoomOut')?.addEventListener('click', () => {
+    document.getElementById('zoomOut')?.addEventListener('click', async () => {
         const steps = [0.5, 0.75, 1, 1.25, 1.5, 2, 3];
-        const cur = parseFloat(currentScale) || 1;
+        const cur = await effectiveScale();
         const prev = [...steps].reverse().find(s => s < cur) || steps[0];
         currentScale = String(prev);
         setZoomSelect(currentScale);
@@ -462,14 +500,25 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
-        if (e.target.tagName === 'INPUT') return;
-        if (e.key === 'ArrowRight' || e.key === 'ArrowDown') goToPage(currentPage + 1);
-        if (e.key === 'ArrowLeft'  || e.key === 'ArrowUp')   goToPage(currentPage - 1);
-        if (e.key === 'f' || e.key === 'F') document.getElementById('fullscreenBtn')?.click();
-        if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+        const tag = e.target.tagName;
+        if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || e.target.isContentEditable) return;
+        // The flipbook overlay has its own key handling; don't also scroll /
+        // zoom the hidden viewer underneath it.
+        const fbOverlay = document.getElementById('fbOverlay');
+        if (fbOverlay && !fbOverlay.classList.contains('fb-hidden')) return;
+
+        // Ctrl/Cmd+F must be checked first: it used to ALSO match the plain
+        // "f" shortcut and toggle fullscreen at the same time.
+        if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F')) {
             e.preventDefault();
             document.getElementById('searchToggle')?.click();
+            return;
         }
+        if (e.ctrlKey || e.metaKey || e.altKey) return; // leave browser shortcuts alone
+
+        if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); goToPage(currentPage + 1); }
+        if (e.key === 'ArrowLeft'  || e.key === 'ArrowUp')   { e.preventDefault(); goToPage(currentPage - 1); }
+        if (e.key === 'f' || e.key === 'F') document.getElementById('fullscreenBtn')?.click();
         if (e.key === '+' || e.key === '=') document.getElementById('zoomIn')?.click();
         if (e.key === '-') document.getElementById('zoomOut')?.click();
         if (e.key === 'Escape') {

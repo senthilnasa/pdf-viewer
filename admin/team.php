@@ -25,8 +25,10 @@ if (isPost()) {
         $name  = trim(post('name'));
         $role  = post('role', 'viewer');
 
-        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($email) > 191) {
             $error = 'Invalid email address.';
+        } elseif (mb_strlen($name) > 120) {
+            $error = 'Name must be 120 characters or fewer.';
         } elseif (!in_array($role, ['admin', 'editor', 'viewer'])) {
             $error = 'Invalid role.';
         } else {
@@ -35,12 +37,39 @@ if (isPost()) {
                 $error = 'A user with this email already exists.';
             } else {
                 $token = bin2hex(random_bytes(32));
-                Database::insert(
-                    'INSERT INTO users (name, email, role, status, invite_token, auth_provider) VALUES (?, ?, ?, ?, ?, ?)',
-                    [$name ?: $email, $email, $role, 'invited', $token, 'local']
-                );
+                // Invites now expire (7 days); see accept-invite.php
+                try {
+                    $newUserId = (int)Database::insert(
+                        'INSERT INTO users (name, email, role, status, invite_token, invite_expires, auth_provider)
+                         VALUES (?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 7 DAY), ?)',
+                        [$name ?: $email, $email, $role, 'invited', $token, 'local']
+                    );
+                } catch (PDOException $e) {
+                    if (!Database::isDuplicateKey($e)) throw $e;
+                    $newUserId = 0; // concurrent invite for the same email
+                }
+            }
+            if (!$error && empty($newUserId)) {
+                $error = $error ?: 'A user with this email already exists.';
+            } elseif (!$error) {
                 $_inviteUrl = $config['base_url'] . '/admin/accept-invite.php?token=' . $token;
-                $success    = 'User invited! Share the invite link with them.';
+
+                AuditLog::log(AuditLog::ACTION_INVITATION_SENT, $user['id'], 'user', $newUserId, ['email' => $email, 'role' => $role]);
+
+                try {
+                    $emailData = EmailTemplate::invitationEmail(
+                        ['name' => $name ?: $email, 'role' => $role],
+                        $_inviteUrl,
+                        $siteName,
+                        $user['name']
+                    );
+                    $emailResult = EmailManager::send($email, $emailData['subject'], $emailData['html'], $emailData['plain'], [], emailProviderConfig());
+                    $success = $emailResult['success']
+                        ? 'User invited! An invitation email was sent to ' . $email . '.'
+                        : 'User invited, but the email could not be sent (' . ($emailResult['message'] ?? 'unknown error') . '). Share the link below manually.';
+                } catch (Throwable $e) {
+                    $success = 'User invited! Share the invite link with them.';
+                }
             }
         }
     }
@@ -54,6 +83,7 @@ if (isPost()) {
             $error = 'Invalid role.';
         } else {
             Database::query('UPDATE users SET role = ? WHERE id = ?', [$newRole, $memberId]);
+            AuditLog::log(AuditLog::ACTION_USER_ROLE_CHANGED, $user['id'], 'user', $memberId, ['new_role' => $newRole]);
             $success = 'Role updated.';
         }
     }
@@ -64,14 +94,22 @@ if (isPost()) {
             $error = "You cannot deactivate your own account.";
         } else {
             Database::query("UPDATE users SET status = 'inactive' WHERE id = ?", [$memberId]);
+            AuditLog::log(AuditLog::ACTION_USER_DEACTIVATED, $user['id'], 'user', $memberId);
             $success = 'User deactivated.';
         }
     }
 
     if ($postAction === 'activate') {
         $memberId = (int)post('member_id');
-        Database::query("UPDATE users SET status = 'active' WHERE id = ?", [$memberId]);
-        $success = 'User activated.';
+        // Only re-activate *inactive* accounts. Activating an "invited" user
+        // (no password yet) invalidated their invite link and locked them out.
+        $stmt = Database::query("UPDATE users SET status = 'active' WHERE id = ? AND status = 'inactive'", [$memberId]);
+        if ($stmt->rowCount() > 0) {
+            AuditLog::log(AuditLog::ACTION_USER_ACTIVATED, $user['id'], 'user', $memberId);
+            $success = 'User activated.';
+        } else {
+            $error = 'Only inactive users can be activated. Invited users must accept their invitation.';
+        }
     }
 
     if ($postAction === 'delete') {
@@ -79,8 +117,16 @@ if (isPost()) {
         if ($memberId === $user['id']) {
             $error = 'You cannot delete your own account.';
         } else {
-            Database::query('DELETE FROM users WHERE id = ?', [$memberId]);
-            $success = 'User deleted.';
+            $docCount = (int)Database::fetchScalar('SELECT COUNT(*) FROM pdf_documents WHERE created_by = ?', [$memberId]);
+            if ($docCount > 0) {
+                // pdf_documents.created_by is ON DELETE RESTRICT — the DELETE
+                // used to throw an uncaught PDOException (HTML 500 for AJAX).
+                $error = "This user owns {$docCount} document(s). Deactivate the account instead, or reassign/delete their documents first.";
+            } else {
+                Database::query('DELETE FROM users WHERE id = ?', [$memberId]);
+                AuditLog::log(AuditLog::ACTION_USER_DELETED, $user['id'], 'user', $memberId);
+                $success = 'User deleted.';
+            }
         }
     }
 
@@ -89,7 +135,8 @@ if (isPost()) {
         $resp = ['success' => !$error, 'message' => $error ?: $success, 'reload' => !$error];
         if ($_inviteUrl) {
             $resp['inviteUrl'] = $_inviteUrl;
-            $resp['reload']    = false; // modal shows URL, reload after dismiss
+            $resp['reload']        = false; // modal shows URL, reload after dismiss
+            $resp['reloadOnClose'] = true;
         }
         echo json_encode($resp);
         exit;
@@ -135,10 +182,10 @@ $members = Database::fetchAll(
         </div>
 
         <?php if ($error): ?>
-            <div class="alert alert-error"><?= $error ?></div>
+            <div class="alert alert-error"><?= e($error) ?></div>
         <?php endif; ?>
         <?php if ($success): ?>
-            <div class="alert alert-success"><?= $success ?></div>
+            <div class="alert alert-success"><?= e($success) ?></div>
         <?php endif; ?>
 
         <div class="card">
@@ -161,7 +208,7 @@ $members = Database::fetchAll(
                                 <?= csrfField() ?>
                                 <input type="hidden" name="_action" value="update_role">
                                 <input type="hidden" name="member_id" value="<?= $member['id'] ?>">
-                                <select name="role" class="form-control" style="padding:.25rem .5rem;font-size:.83rem" onchange="this.form.submit()">
+                                <select name="role" class="form-control" style="padding:.25rem .5rem;font-size:.83rem" onchange="this.form.requestSubmit ? this.form.requestSubmit() : this.form.submit()">
                                     <option value="admin"  <?= $member['role']==='admin'?'selected':'' ?>>Admin</option>
                                     <option value="editor" <?= $member['role']==='editor'?'selected':'' ?>>Editor</option>
                                     <option value="viewer" <?= $member['role']==='viewer'?'selected':'' ?>>Viewer</option>
@@ -183,7 +230,7 @@ $members = Database::fetchAll(
                                 <input type="hidden" name="member_id" value="<?= $member['id'] ?>">
                                 <button type="submit" class="btn btn-xs btn-warning">Deactivate</button>
                             </form>
-                            <?php else: ?>
+                            <?php elseif ($member['status'] === 'inactive'): ?>
                             <form method="POST" style="display:inline" data-ajax>
                                 <?= csrfField() ?>
                                 <input type="hidden" name="_action" value="activate">

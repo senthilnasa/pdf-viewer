@@ -23,13 +23,14 @@ uploads/*.svg
 # (Keep sample / template configs, ignore live ones)
 config/database.php
 config/app.php
+config/install.lock
+config/*.tmp-*
 
 # Keep sample configs
 !config/database.php.example
 !config/app.php.example
 
-# Installer (should be deleted after setup, but ignore if forgotten)
-install.php
+# (install.php is part of the app: it locks itself via config/install.lock)
 
 # Environment / secrets
 .env
@@ -37,9 +38,9 @@ install.php
 *.env
 #keep .env.example
 !.env.example
-# Composer (if ever added)
+# Composer dependencies (installed with `composer install`; bundled in release ZIPs)
 vendor/
-composer.lock
+# composer.lock IS committed so every install gets the same PHPMailer version
 
 # Node / npm (not used, but safety net)
 node_modules/
@@ -81,3 +82,6 @@ docker-compose.local.yml
 docker/certs/*.pem
 docker/certs/*.crt
 docker/certs/*.key
+
+# Release build output
+dist/

@@ -304,17 +304,71 @@ class Analytics
     // Helpers
     // -------------------------------------------------------------------------
 
+    /**
+     * Resolve the visitor IP.
+     *
+     * Proxy headers (CF-Connecting-IP, X-Forwarded-For, X-Real-IP) are fully
+     * client-controlled, so they are only honoured when the direct peer
+     * (REMOTE_ADDR) is a private / loopback address, i.e. the request really
+     * came through a reverse proxy or load balancer. Previously they were
+     * trusted unconditionally, which let anyone bypass the login rate limiter
+     * (keyed by IP) and forge analytics / audit-log IPs just by sending a
+     * random X-Forwarded-For header.
+     */
     public static function getClientIp(): string
     {
-        $keys = ['HTTP_CF_CONNECTING_IP', 'HTTP_X_FORWARDED_FOR', 'HTTP_X_REAL_IP', 'REMOTE_ADDR'];
-        foreach ($keys as $key) {
-            if (!empty($_SERVER[$key])) {
-                $ip = trim(explode(',', $_SERVER[$key])[0]);
-                if (filter_var($ip, FILTER_VALIDATE_IP)) {
-                    return $ip;
+        $remote = $_SERVER['REMOTE_ADDR'] ?? '';
+        $remoteValid = filter_var($remote, FILTER_VALIDATE_IP) !== false;
+
+        // config/app.php 'trusted_proxies':
+        //   'auto' (default) — trust headers when the peer is a private/loopback IP
+        //   []               — never trust headers (app is directly exposed)
+        //   ['10.0.0.1', '172.16.0.0/12', …] — only these proxies
+        global $config;
+        $trusted = is_array($config ?? null) ? ($config['trusted_proxies'] ?? 'auto') : 'auto';
+
+        if (is_array($trusted)) {
+            $behindProxy = $remoteValid && self::ipInList($remote, $trusted);
+        } else {
+            $behindProxy = $remoteValid && filter_var(
+                $remote,
+                FILTER_VALIDATE_IP,
+                FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE
+            ) === false;
+        }
+
+        if ($behindProxy) {
+            foreach (['HTTP_CF_CONNECTING_IP', 'HTTP_X_FORWARDED_FOR', 'HTTP_X_REAL_IP'] as $key) {
+                if (!empty($_SERVER[$key])) {
+                    $ip = trim(explode(',', $_SERVER[$key])[0]);
+                    if (filter_var($ip, FILTER_VALIDATE_IP)) {
+                        return $ip;
+                    }
                 }
             }
         }
-        return '0.0.0.0';
+
+        return $remoteValid ? $remote : '0.0.0.0';
+    }
+
+    /** Exact IP or CIDR match (IPv4 / IPv6). */
+    private static function ipInList(string $ip, array $list): bool
+    {
+        $bin = @inet_pton($ip);
+        if ($bin === false) return false;
+        foreach ($list as $entry) {
+            $entry = trim((string)$entry);
+            [$net, $bits] = array_pad(explode('/', $entry, 2), 2, null);
+            $netBin = @inet_pton($net);
+            if ($netBin === false || strlen($netBin) !== strlen($bin)) continue;
+            $bits = $bits === null ? strlen($bin) * 8 : (int)$bits;
+            $bytes = intdiv($bits, 8);
+            $rem   = $bits % 8;
+            if (substr($bin, 0, $bytes) !== substr($netBin, 0, $bytes)) continue;
+            if ($rem === 0) return true;
+            $mask = chr((0xFF << (8 - $rem)) & 0xFF);
+            if ((($bin[$bytes] ?? "\0") & $mask) === (($netBin[$bytes] ?? "\0") & $mask)) return true;
+        }
+        return false;
     }
 }

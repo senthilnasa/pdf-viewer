@@ -3,6 +3,16 @@ $user            = $user ?? $auth->currentUser();
 $_demoActive     = getSetting('demo_mode', false);
 $_cronLastRun    = (int)getSetting('cron_last_run', 0);
 
+// Notification bell data (fails silently on installs that haven't run the migration yet)
+$_notifUnread = 0;
+$_notifRecent = [];
+try {
+    if ($user) {
+        $_notifUnread = Notification::getUnreadCount($user['id']);
+        $_notifRecent = Notification::getAll($user['id'], 6);
+    }
+} catch (Throwable $_) {}
+
 if ($_demoActive) {
     $_demoInterval  = (int)getSetting('demo_reset_interval', 60);
     $_demoLastReset = (int)getSetting('demo_last_reset_at', 0);
@@ -225,11 +235,61 @@ if ($_demoActive) {
         </svg>
     </button>
     <div class="topbar-right">
-        <div class="user-menu">
-            <div class="user-avatar"><?= strtoupper(mb_substr($user['name'] ?? 'U', 0, 1)) ?></div>
-            <div class="user-info">
-                <span class="user-name"><?= e($user['name'] ?? '') ?></span>
-                <span class="user-role badge badge-<?= $user['role'] === 'admin' ? 'primary' : 'success' ?>"><?= e($user['role'] ?? '') ?></span>
+        <div style="position:relative">
+            <button class="notif-bell" id="notifBellBtn" aria-label="Notifications" aria-haspopup="true" aria-expanded="false">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" width="20" height="20">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/>
+                </svg>
+                <?php if ($_notifUnread > 0): ?><span class="bell-dot"></span><?php endif; ?>
+            </button>
+            <div class="notif-dropdown" id="notifDropdown">
+                <div class="notif-dropdown-header">
+                    <span>Notifications</span>
+                    <?php if ($_notifUnread > 0): ?><span class="badge badge-primary"><?= $_notifUnread ?> new</span><?php endif; ?>
+                </div>
+                <?php if (empty($_notifRecent)): ?>
+                <div class="notif-dropdown-empty">You're all caught up.</div>
+                <?php else: ?>
+                    <?php foreach ($_notifRecent as $n): ?>
+                    <a href="<?= e($n['action_url'] ?: '../admin/notifications.php') ?>" class="notif-dropdown-item <?= $n['read_at'] ? '' : 'unread' ?>">
+                        <strong style="display:block;font-size:.82rem;margin-bottom:.15rem"><?= e($n['title']) ?></strong>
+                        <span style="display:block;font-size:.78rem;color:var(--text-muted);margin-bottom:.25rem"><?= e(mb_substr($n['message'], 0, 90)) ?></span>
+                        <small style="color:#999;font-size:.72rem"><?= timeAgo($n['created_at']) ?></small>
+                    </a>
+                    <?php endforeach; ?>
+                <?php endif; ?>
+                <div class="notif-dropdown-footer">
+                    <a href="../admin/notifications.php">View all notifications</a>
+                </div>
+            </div>
+        </div>
+        <div style="position:relative">
+            <button class="user-menu" id="userMenuBtn" aria-haspopup="true" aria-expanded="false" style="background:none;border:none;cursor:pointer;padding:.25rem .4rem;border-radius:8px;transition:background-color var(--dur-fast)">
+                <div class="user-avatar"><?= strtoupper(mb_substr($user['name'] ?? 'U', 0, 1)) ?></div>
+                <div class="user-info">
+                    <span class="user-name"><?= e($user['name'] ?? '') ?></span>
+                    <span class="user-role badge badge-<?= $user['role'] === 'admin' ? 'primary' : 'success' ?>"><?= e($user['role'] ?? '') ?></span>
+                </div>
+            </button>
+            <div class="notif-dropdown" id="userDropdown" style="width:200px">
+                <a href="../admin/profile.php" class="notif-dropdown-item">
+                    <span style="display:flex;align-items:center;gap:.55rem;font-size:.85rem;font-weight:600">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+                        My Profile
+                    </span>
+                </a>
+                <a href="../admin/notifications.php" class="notif-dropdown-item">
+                    <span style="display:flex;align-items:center;gap:.55rem;font-size:.85rem;font-weight:600">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
+                        Notifications
+                    </span>
+                </a>
+                <a href="../api/auth.php?action=logout" class="notif-dropdown-item">
+                    <span style="display:flex;align-items:center;gap:.55rem;font-size:.85rem;font-weight:600;color:var(--danger)">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
+                        Logout
+                    </span>
+                </a>
             </div>
         </div>
     </div>
@@ -238,4 +298,49 @@ if ($_demoActive) {
     document.getElementById('sidebarToggle')?.addEventListener('click', () => {
         document.getElementById('sidebar')?.classList.toggle('open');
     });
+
+    (function () {
+        var btn = document.getElementById('notifBellBtn');
+        var dropdown = document.getElementById('notifDropdown');
+        if (!btn || !dropdown) return;
+
+        btn.addEventListener('click', function (e) {
+            e.stopPropagation();
+            var isOpen = dropdown.classList.toggle('open');
+            btn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+        });
+
+        document.addEventListener('click', function (e) {
+            if (!dropdown.contains(e.target) && e.target !== btn) {
+                dropdown.classList.remove('open');
+                btn.setAttribute('aria-expanded', 'false');
+            }
+        });
+
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape') {
+                dropdown.classList.remove('open');
+                btn.setAttribute('aria-expanded', 'false');
+            }
+        });
+    })();
+
+    (function () {
+        var btn = document.getElementById('userMenuBtn');
+        var dropdown = document.getElementById('userDropdown');
+        if (!btn || !dropdown) return;
+
+        btn.addEventListener('click', function (e) {
+            e.stopPropagation();
+            var isOpen = dropdown.classList.toggle('open');
+            btn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+        });
+
+        document.addEventListener('click', function (e) {
+            if (!dropdown.contains(e.target) && e.target !== btn && !btn.contains(e.target)) {
+                dropdown.classList.remove('open');
+                btn.setAttribute('aria-expanded', 'false');
+            }
+        });
+    })();
 </script>

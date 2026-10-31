@@ -26,6 +26,8 @@
 - [Demo / Test Mode & Cron Jobs](#demo--test-mode--cron-jobs)
 - [Security Notes](#security-notes)
 - [Troubleshooting](#troubleshooting)
+- [Email (PHPMailer)](#email-phpmailer)
+- [Running the Tests](#running-the-tests)
 - [Contributing](#contributing)
 - [License](#license)
 
@@ -278,6 +280,10 @@ git pull origin main
 docker compose up -d --build
 ```
 
+The image runs `composer install` (PHPMailer) at build time, and the
+entrypoint runs `php migrate.php` on every start, so new tables/columns are
+applied to the existing database automatically.
+
 ---
 
 ## Deployment Guide B — Shared Hosting (Apache + PHP + MySQL)
@@ -411,17 +417,24 @@ The 4-step wizard will:
 
 ---
 
-### Step 8 — Delete the Installer
+### Step 8 — Installation Lock (automatic)
 
-> **Critical security step.** Anyone who finds `install.php` can reset your database.
+A successful install writes **`config/install.lock`**. While that file exists
+`install.php` refuses every request with *403 Already installed*, so nobody can
+re-run it to create an admin account, reset passwords or repoint the database.
 
-Delete via FTP, cPanel File Manager, or SSH:
+- Installations made before the lock existed are detected (config present +
+  users in the database) and locked automatically the first time
+  `install.php` is opened.
+- The installer never writes into a database that already contains user
+  accounts, so an existing production database can't be overwritten.
+- An interrupted install is safe to re-run: the schema is idempotent, config
+  files are written atomically, and the lock is written last.
 
-```bash
-rm public_html/pdf-viewer/install.php
-```
-
-Or rename it: `install.php` → `install.php.bak`
+**Deliberate reinstall / recovery:** someone with server access deletes
+`config/install.lock` and runs the installer against an **empty** database
+(or drops the existing tables first). Deleting `install.php` after setup is
+still a good extra precaution.
 
 ---
 
@@ -486,13 +499,17 @@ Once HTTPS is active, update `config/app.php`:
 
 ```bash
 git pull origin main
+composer install --no-dev      # installs/updates PHPMailer into vendor/
+php migrate.php                # applies database-migrations.sql (idempotent)
 ```
 
-**Via FTP:**
+**Via FTP / release ZIP:**
 
-1. Download the latest ZIP from GitHub
-2. Upload and overwrite all files **except** `config/app.php` and `config/database.php`
-3. Your uploads, config, and database remain intact
+1. Download the release ZIP (it already contains `vendor/`)
+2. Upload and overwrite all files **except** `config/app.php`, `config/database.php` and `config/install.lock`
+3. Apply schema updates: run `php migrate.php` over SSH, or import
+   `database-migrations.sql` in phpMyAdmin (safe to run more than once)
+4. Your uploads, config, and database remain intact
 
 ---
 
@@ -713,11 +730,14 @@ The full ready-to-paste crontab commands are shown there with your actual token 
 ## Security Notes
 
 - All SQL queries use **PDO prepared statements** — no SQL injection possible
-- File uploads validated by **MIME type** (via `finfo`), not just extension
-- **CSRF tokens** on every state-changing form
-- **Rate limiting** on login — 5 attempts per 15 minutes by default (configurable)
-- `uploads/` directory has its own `.htaccess` that **blocks PHP execution**
-- PDF files are served through `api/serve-pdf.php` — **real file paths are never exposed** to the browser
+- File uploads validated by **MIME type** (via `finfo`); stored file extensions are derived from the detected type, never from the client filename
+- **CSRF tokens** on every state-changing form (per-session token with a sliding expiry)
+- **Rate limiting** on login — 5 attempts per IP and 15 per account per 15 minutes (configurable)
+- Proxy headers (`X-Forwarded-For`, `CF-Connecting-IP`) are only trusted from configured proxies — see `trusted_proxies` in `config/app.php`
+- `uploads/` has its own `.htaccess`: no script execution, **only images are publicly reachable** — PDFs (including private ones) can only be fetched through `api/serve-pdf.php`, which enforces visibility, share-link tokens/limits and the download setting
+- **Installer lock** (`config/install.lock`) — see *Step 8* above
+- Password-reset links are only ever delivered by email; responses don't reveal whether an account exists
+- Invitation links expire after 7 days
 - Sessions are hardened: `httponly`, `strict_mode`, `secure` (on HTTPS)
 
 ---
@@ -738,9 +758,14 @@ The full ready-to-paste crontab commands are shown there with your actual token 
 
 ### PDF Uploads Fail
 
-- Check `uploads/` is writable (`chmod 755` or `775`)
-- Increase PHP limits: `upload_max_filesize`, `post_max_size` in `.htaccess` or `php.ini`
-- Check `config/app.php` → `max_upload_size` matches your PHP limits
+- The upload page shows the **effective** limit (the smallest of `max_upload_size`, `upload_max_filesize` and `post_max_size`). Larger files are rejected in the browser before uploading.
+- A file larger than `post_max_size` now returns a clear *"The upload is too large for this server"* message. (Previously PHP discarded the request, the CSRF token was lost, and you got **403 Invalid CSRF token**.)
+- Raise the limits:
+  - Apache + mod_php: the `php_value` lines in `.htaccess`
+  - **PHP-FPM / CGI (most shared hosts): `.user.ini`** in the app root (shipped with 100M / 105M); `.htaccess` `php_value` lines are ignored there
+  - Docker: `docker/php/php.ini`
+- Check `uploads/` is writable by the web server (`chmod 755` or `775`, correct owner) — the error message now says so explicitly
+- Keep `config/app.php` → `max_upload_size` ≤ your PHP limits
 
 ### Google OAuth Redirect Error
 
@@ -762,6 +787,35 @@ docker compose exec app chmod -R 775 /var/www/html/uploads
   docker compose down -v
   docker compose up -d
   ```
+
+---
+
+## Email (PHPMailer)
+
+Settings → Email / SMTP → **Delivery Method** offers:
+
+| Method | Notes |
+| ------ | ----- |
+| **PHPMailer (SMTP)** | Recommended. Uses the bundled [PHPMailer](https://github.com/PHPMailer/PHPMailer) library (`composer install`; included in release ZIPs and the Docker image). Supports STARTTLS / SMTPS / plain, SMTP auth, UTF-8. Falls back to `mail()` when no SMTP host is set. |
+| SMTP — built-in client | Dependency-free socket SMTP client (used automatically if PHPMailer isn't installed). |
+| Disabled — log only | Writes messages to a log file (development / demo). |
+
+Use *Test Email Delivery* on the Settings page to verify.
+
+---
+
+## Running the Tests
+
+`tests/run-e2e.sh` installs a **fresh copy** of the app against a real MySQL /
+MariaDB server, then runs 75 HTTP/database checks (installer and lock, auth,
+uploads, range requests, share links, roles, CSV export, migrations, cron, rate
+limiting, PHP error log) and, when Node + Playwright are available, 14 browser
+checks (AJAX forms, viewer, flipbook).
+
+```bash
+DB_HOST=127.0.0.1 DB_USER=root DB_PASS=secret tests/run-e2e.sh
+# offline machines: LIB_DIR=/path/with/pdfjs-and-page-flip tests/run-e2e.sh
+```
 
 ---
 

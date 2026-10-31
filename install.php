@@ -7,12 +7,48 @@
 
 define('INSTALLER', true);
 define('ROOT', __DIR__);
+require ROOT . '/includes/Installer.php';
 
+session_name('pdfv_install');
 session_start();
 
+// ------------------------------------------------------------------
+// Installation lock: once installed, the installer is disabled for every
+// request (it used to stay fully usable, so anyone could re-run step 3 to
+// create a new admin, reset the existing admin's password or repoint the DB).
+// Pre-lock installs are detected and locked on the spot.
+// ------------------------------------------------------------------
+$justInstalled = !empty($_SESSION['install_done']);
+if (!Installer::isLocked() && !$justInstalled && Installer::detectExistingInstall()) {
+    Installer::writeLock(['note' => 'auto-locked: existing installation detected']);
+}
+if (Installer::isLocked() && !($justInstalled && (int)($_GET['step'] ?? 0) === 4)) {
+    http_response_code(403);
+    header('Content-Type: text/html; charset=utf-8');
+    echo '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">'
+       . '<title>Already installed</title><style>body{font-family:system-ui,sans-serif;background:#f0f4f8;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}'
+       . '.c{background:#fff;border-radius:12px;box-shadow:0 4px 24px rgba(0,0,0,.1);max-width:520px;padding:2rem;margin:1rem}code{background:#f1f5f9;padding:.1rem .3rem;border-radius:4px}</style></head>'
+       . '<body><div class="c"><h1 style="margin-top:0">Already installed</h1>'
+       . '<p>This application is already installed, so the installer is locked.</p>'
+       . '<p style="color:#64748b;font-size:.9rem">To intentionally reinstall, a server administrator must delete <code>config/install.lock</code> '
+       . 'and run the installer against an <strong>empty</strong> database. Existing databases are never overwritten.</p>'
+       . '<p><a href="admin/">Go to the admin panel &rarr;</a></p></div></body></html>';
+    exit;
+}
+
+if (empty($_SESSION['install_csrf'])) {
+    $_SESSION['install_csrf'] = bin2hex(random_bytes(32));
+}
+
 $step  = (int)($_GET['step'] ?? 1);
+$step  = ($step >= 1 && $step <= 4) ? $step : 1;
 $error = '';
 $success = '';
+
+// Step 4 is only reachable right after a successful install in this session
+if ($step === 4 && !$justInstalled) {
+    $step = 1;
+}
 
 // Step 3: process installation
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 3) {
@@ -27,43 +63,50 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 3) {
     $adminEmail = trim($_POST['admin_email'] ?? '');
     $adminPass  = $_POST['admin_pass'] ?? '';
 
-    if (!$dbName || !$dbUser || !$adminEmail || !$adminPass || !$baseUrl) {
+    if (!hash_equals($_SESSION['install_csrf'], (string)($_POST['csrf_token'] ?? ''))) {
+        $error = 'Your session expired. Please submit the form again.';
+    } elseif (!$dbName || !$dbUser || !$adminEmail || !$adminPass || !$baseUrl) {
         $error = 'All fields are required.';
+    } elseif (!preg_match('/^[A-Za-z0-9_]{1,64}$/', $dbName)) {
+        // The name is interpolated into CREATE DATABASE / USE statements
+        $error = 'Database name may only contain letters, numbers and underscores.';
+    } elseif (!preg_match('/^[A-Za-z0-9.\-:\[\]]+$/', $dbHost) || $dbPort < 1 || $dbPort > 65535) {
+        $error = 'Invalid database host or port.';
+    } elseif (!filter_var($baseUrl, FILTER_VALIDATE_URL) || !preg_match('#^https?://#i', $baseUrl)) {
+        $error = 'Base URL must be a full http(s):// URL.';
     } elseif (!filter_var($adminEmail, FILTER_VALIDATE_EMAIL)) {
         $error = 'Invalid admin email address.';
     } elseif (strlen($adminPass) < 8) {
         $error = 'Admin password must be at least 8 characters.';
+    } elseif (mb_strlen($adminName) > 120) {
+        $error = 'Admin name must be 120 characters or fewer.';
+    } elseif (!is_writable(ROOT . '/config')) {
+        $error = 'The config/ directory is not writable by the web server.';
     } else {
+        $dbCfg = ['host' => $dbHost, 'port' => $dbPort, 'name' => $dbName, 'username' => $dbUser, 'password' => $dbPass];
         try {
-            $dsn = "mysql:host={$dbHost};port={$dbPort};charset=utf8mb4";
-            $pdo = new PDO($dsn, $dbUser, $dbPass, [
-                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-            ]);
+            $pdo = Installer::connect($dbCfg, false);
 
             // Create database if not exists
             $pdo->exec("CREATE DATABASE IF NOT EXISTS `{$dbName}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
             $pdo->exec("USE `{$dbName}`");
 
-            // Run schema
-            $sql = file_get_contents(ROOT . '/database.sql');
-            // Split on semicolons (rough but works for this schema)
-            $statements = array_filter(array_map('trim', explode(';', $sql)));
-            foreach ($statements as $stmt) {
-                if ($stmt) {
-                    $pdo->exec($stmt);
-                }
+            // Never overwrite an existing installation's data.
+            if (Installer::databaseHasUsers($pdo)) {
+                throw new RuntimeException(
+                    'This database already contains user accounts (an existing installation). '
+                    . 'Use an empty database, or remove the existing tables first if you really want to reinstall.'
+                );
             }
 
-            // Insert admin user
-            $hash = password_hash($adminPass, PASSWORD_BCRYPT);
-            $stmt = $pdo->prepare(
-                "INSERT INTO users (name, email, password, role, auth_provider, status)
-                 VALUES (?, ?, ?, 'admin', 'local', 'active')
-                 ON DUPLICATE KEY UPDATE role='admin', password=VALUES(password)"
-            );
-            $stmt->execute([$adminName ?: 'Administrator', $adminEmail, $hash]);
+            // 1) Schema + migrations (all idempotent: safe to repeat after an
+            //    interrupted install)
+            Installer::runSqlFile($pdo, ROOT . '/database.sql');
+            if (is_file(ROOT . '/database-migrations.sql')) {
+                Installer::runSqlFile($pdo, ROOT . '/database-migrations.sql');
+            }
 
-            // Write config files
+            // 2) Config files (atomic writes)
             $dbConfigContent = "<?php\nreturn [\n"
                 . "    'host'     => " . var_export($dbHost, true) . ",\n"
                 . "    'port'     => {$dbPort},\n"
@@ -77,34 +120,48 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 3) {
                 . "        PDO::ATTR_EMULATE_PREPARES   => false,\n"
                 . "    ],\n"
                 . "];\n";
-            file_put_contents(ROOT . '/config/database.php', $dbConfigContent);
-
-            // Update app config base_url and site_name
-            $appConfigPath = ROOT . '/config/app.php';
-            if (!file_exists($appConfigPath)) {
-                copy(ROOT . '/config/app.php.example', $appConfigPath);
+            if (!Installer::atomicWrite(ROOT . '/config/database.php', $dbConfigContent)) {
+                throw new RuntimeException('Could not write config/database.php.');
             }
-            $appConfig = file_get_contents($appConfigPath);
-            $appConfig = preg_replace(
-                "/'base_url'\s*=>\s*'[^']*'/",
-                "'base_url' => " . var_export($baseUrl, true),
-                $appConfig
+
+            $appConfigPath = ROOT . '/config/app.php';
+            $appConfig = file_exists($appConfigPath)
+                ? file_get_contents($appConfigPath)
+                : file_get_contents(ROOT . '/config/app.php.example');
+            $appConfig = Installer::setConfigValue($appConfig, 'base_url', $baseUrl);
+            $appConfig = Installer::setConfigValue($appConfig, 'site_name', $siteName);
+            if (!Installer::atomicWrite($appConfigPath, $appConfig)) {
+                throw new RuntimeException('Could not write config/app.php.');
+            }
+
+            // 3) Admin account + site name (in one transaction)
+            $pdo->beginTransaction();
+            $hash = password_hash($adminPass, PASSWORD_BCRYPT);
+            $stmt = $pdo->prepare(
+                "INSERT INTO users (name, email, password, role, auth_provider, status)
+                 VALUES (?, ?, ?, 'admin', 'local', 'active')"
             );
-            $appConfig = preg_replace(
-                "/'site_name'\s*=>\s*'[^']*'/",
-                "'site_name' => " . var_export($siteName, true),
-                $appConfig
-            );
-            file_put_contents($appConfigPath, $appConfig);
+            $stmt->execute([$adminName ?: 'Administrator', $adminEmail, $hash]);
+            $pdo->prepare(
+                "INSERT INTO settings (`key`, `value`, `type`) VALUES ('site_name', ?, 'string')
+                 ON DUPLICATE KEY UPDATE `value` = VALUES(`value`)"
+            )->execute([$siteName]);
+            $pdo->commit();
+
+            // 4) Lock — last step. If this write fails the install is still
+            //    complete and the next installer hit auto-locks it.
+            Installer::writeLock(['base_url' => $baseUrl]);
 
             $_SESSION['install_done'] = true;
+            unset($_SESSION['install_csrf']);
             header('Location: install.php?step=4');
             exit;
 
-        } catch (PDOException $e) {
-            $error = 'Database error: ' . htmlspecialchars($e->getMessage());
-        } catch (Exception $e) {
-            $error = 'Error: ' . htmlspecialchars($e->getMessage());
+        } catch (Throwable $e) {
+            if (isset($pdo) && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            $error = ($e instanceof PDOException ? 'Database error: ' : 'Error: ') . htmlspecialchars($e->getMessage());
         }
     }
 }
@@ -209,6 +266,7 @@ $pageTitle = 'PDF Viewer — Installer';
             <div class="alert alert-error"><?= $error ?></div>
         <?php endif; ?>
         <form method="POST" action="install.php?step=3">
+            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['install_csrf'] ?? '') ?>">
             <p class="section-title">Database Connection</p>
             <div class="row">
                 <div class="form-group">
@@ -265,9 +323,11 @@ $pageTitle = 'PDF Viewer — Installer';
             <h2 style="margin:.75rem 0 .5rem;color:#10b981;">Installation Complete!</h2>
             <p style="color:#6b7280;margin-bottom:1.5rem;">PDF Viewer has been successfully installed.</p>
         </div>
-        <div class="alert alert-error" style="margin-bottom:1.5rem;">
-            <strong>Security Notice:</strong> Delete or rename <code>install.php</code> immediately to prevent unauthorized re-installation.
+        <div class="alert alert-info" style="margin-bottom:1.5rem;">
+            <strong>Installer locked.</strong> <code>config/install.lock</code> was created, so this installer can no longer be used.
+            You can also delete <code>install.php</code> as an extra precaution.
         </div>
+        <?php unset($_SESSION['install_done']); ?>
         <a href="admin/" class="btn btn-success">Go to Admin Panel &rarr;</a>
     <?php endif; ?>
 

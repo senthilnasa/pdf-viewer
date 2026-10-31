@@ -14,7 +14,12 @@ $success  = '';
 
 $user = null;
 if ($token) {
-    $user = Database::fetchOne("SELECT * FROM users WHERE invite_token = ? AND status = 'invited'", [$token]);
+    // Invites expire after 7 days (NULL = legacy invite created before expiry existed)
+    $user = Database::fetchOne(
+        "SELECT * FROM users WHERE invite_token = ? AND status = 'invited'
+           AND (invite_expires IS NULL OR invite_expires > NOW())",
+        [$token]
+    );
 }
 
 if (!$user && !$error) {
@@ -27,17 +32,21 @@ if (isPost() && $user) {
     $confirm  = post('confirm');
     $name     = trim(post('name')) ?: $user['name'];
 
-    if (strlen($password) < 8) {
+    if (mb_strlen($name) > 120) {
+        $error = 'Name must be 120 characters or fewer.';
+    } elseif (strlen($password) < 8) {
         $error = 'Password must be at least 8 characters.';
     } elseif ($password !== $confirm) {
         $error = 'Passwords do not match.';
     } else {
         $hash = password_hash($password, PASSWORD_BCRYPT);
         Database::query(
-            "UPDATE users SET name = ?, password = ?, status = 'active', invite_token = NULL WHERE id = ?",
+            "UPDATE users SET name = ?, password = ?, status = 'active', invite_token = NULL, invite_expires = NULL
+             WHERE id = ? AND status = 'invited'",
             [$name, $hash, $user['id']]
         );
-        $success = 'Account activated! <a href="login.php">Login now</a>';
+        AuditLog::log(AuditLog::ACTION_INVITATION_ACCEPTED, $user['id'], 'user', $user['id']);
+        $success = 'Account activated!';
     }
 }
 ?>
@@ -60,8 +69,8 @@ if (isPost() && $user) {
 <div class="card">
     <div class="login-header"><h1>Accept Invitation</h1><p style="opacity:.85;font-size:.9rem"><?= e($siteName) ?></p></div>
     <div class="login-body">
-        <?php if ($error): ?><div class="alert alert-error"><?= $error ?></div>
-        <?php elseif ($success): ?><div class="alert alert-success"><?= $success ?></div>
+        <?php if ($error): ?><div class="alert alert-error"><?= e($error) ?></div>
+        <?php elseif ($success): ?><div class="alert alert-success"><?= e($success) ?> <a href="login.php">Login now</a></div>
         <?php else: ?>
         <p style="margin-bottom:1.25rem">You've been invited as <strong><?= e($user['role']) ?></strong>. Set your password to activate your account.</p>
         <form method="POST">

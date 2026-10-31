@@ -38,13 +38,24 @@ class Auth
     public function currentUser(): ?array
     {
         if (!$this->isLoggedIn()) return null;
-        return Database::fetchOne('SELECT * FROM users WHERE id = ? AND status = ?', [$_SESSION['user_id'], 'active']);
+        // fetchOne() returns false for a deactivated/deleted user; returning
+        // that from a ?array method threw a TypeError (500 on every page).
+        return Database::fetchOne('SELECT * FROM users WHERE id = ? AND status = ?', [$_SESSION['user_id'], 'active']) ?: null;
     }
 
     public function requireLogin(string $redirect = ''): void
     {
+        $url = $redirect ?: $this->config['base_url'] . '/admin/login.php';
         if (!$this->isLoggedIn()) {
-            $url = $redirect ?: $this->config['base_url'] . '/admin/login.php';
+            header('Location: ' . $url);
+            exit;
+        }
+        // A session can outlive the account (user deactivated or deleted while
+        // logged in). Treat that as logged out instead of letting pages run
+        // with $user === false.
+        if (!$this->currentUser()) {
+            $_SESSION = [];
+            session_regenerate_id(true);
             header('Location: ' . $url);
             exit;
         }
@@ -55,7 +66,9 @@ class Auth
         $this->requireLogin();
         $hierarchy = ['viewer' => 1, 'editor' => 2, 'admin' => 3];
         $user = $this->currentUser();
-        $userLevel = $hierarchy[$user['role']] ?? 0;
+        // Always use the role from the DB (not the session copy), so role
+        // changes/demotions take effect immediately.
+        $userLevel = $hierarchy[$user['role'] ?? ''] ?? 0;
         $minLevel  = $hierarchy[$minRole] ?? 99;
         if ($userLevel < $minLevel) {
             http_response_code(403);
@@ -84,6 +97,10 @@ class Auth
 
         if (!$user || !$user['password'] || !password_verify($password, $user['password'])) {
             $this->recordFailedAttempt($ip, $email);
+            // Log failed attempt
+            if ($user) {
+                AuditLog::log(AuditLog::ACTION_LOGIN_FAILED, $user['id'], '', 0, [], $ip, $_SERVER['HTTP_USER_AGENT'] ?? '');
+            }
             return ['success' => false, 'error' => 'Invalid email or password.'];
         }
 
@@ -92,11 +109,19 @@ class Auth
         $this->createUserSession($user);
         Database::query('UPDATE users SET last_login = NOW() WHERE id = ?', [$user['id']]);
 
+        // Log successful login
+        AuditLog::log(AuditLog::ACTION_LOGIN, $user['id'], '', 0, [], $ip, $_SERVER['HTTP_USER_AGENT'] ?? '');
+
         return ['success' => true, 'user' => $user];
     }
 
     public function logout(): void
     {
+        // Log logout action
+        if (isset($_SESSION['user_id'])) {
+            AuditLog::log(AuditLog::ACTION_LOGOUT, $_SESSION['user_id'], '', 0);
+        }
+
         $_SESSION = [];
         if (ini_get('session.use_cookies')) {
             $p = session_get_cookie_params();
@@ -141,14 +166,20 @@ class Auth
 
         // Get user info
         $userInfo = $this->googleGetUserInfo($tokenData['access_token']);
-        if (!$userInfo || !isset($userInfo['email'])) {
+        if (!$userInfo || !isset($userInfo['email'], $userInfo['sub'])) {
             return ['success' => false, 'error' => 'Failed to obtain user information.'];
         }
 
+        // Only trust Google-verified addresses — accounts are matched by email.
+        $emailVerified = $userInfo['email_verified'] ?? false;
+        if ($emailVerified !== true && $emailVerified !== 'true') {
+            return ['success' => false, 'error' => 'Your Google email address is not verified.'];
+        }
+
         // Domain restriction
-        $allowedDomains = $this->config['google_allowed_domains'] ?? [];
+        $allowedDomains = array_map('strtolower', (array)($this->config['google_allowed_domains'] ?? []));
         if (!empty($allowedDomains)) {
-            $domain = substr(strrchr($userInfo['email'], '@'), 1);
+            $domain = strtolower(substr(strrchr($userInfo['email'], '@'), 1));
             if (!in_array($domain, $allowedDomains, true)) {
                 return ['success' => false, 'error' => 'Your email domain is not allowed.'];
             }
@@ -157,18 +188,22 @@ class Auth
         // Upsert user
         $existing = Database::fetchOne('SELECT * FROM users WHERE google_id = ? OR email = ?', [$userInfo['sub'], $userInfo['email']]);
 
-        if ($existing) {
-            Database::query('UPDATE users SET google_id = ?, avatar = ?, auth_provider = ?, last_login = NOW() WHERE id = ?', [
-                $userInfo['sub'], $userInfo['picture'] ?? null, 'google', $existing['id'],
-            ]);
-            $user = Database::fetchOne('SELECT * FROM users WHERE id = ?', [$existing['id']]);
-        } else {
+        if (!$existing) {
             return ['success' => false, 'error' => 'No account found for this email address. Please contact an administrator to get access.'];
         }
 
-        if ($user['status'] !== 'active') {
+        // Check status BEFORE touching the row, so inactive/invited accounts
+        // are not silently linked to a Google identity.
+        if ($existing['status'] !== 'active') {
             return ['success' => false, 'error' => 'Your account is inactive.'];
         }
+
+        // auth_provider is left unchanged: flipping it to "google" used to
+        // lock local-password users out of the "forgot password" flow.
+        Database::query('UPDATE users SET google_id = ?, avatar = ?, last_login = NOW() WHERE id = ?', [
+            $userInfo['sub'], $userInfo['picture'] ?? null, $existing['id'],
+        ]);
+        $user = Database::fetchOne('SELECT * FROM users WHERE id = ?', [$existing['id']]);
 
         $this->createUserSession($user);
         return ['success' => true, 'user' => $user];
@@ -211,14 +246,44 @@ class Auth
 
     public function generateResetToken(string $email): ?string
     {
-        $user = Database::fetchOne('SELECT id FROM users WHERE email = ? AND auth_provider = ?', [$email, 'local']);
+        $user = Database::fetchOne(
+            'SELECT * FROM users WHERE email = ? AND auth_provider = ? AND status = ?',
+            [$email, 'local', 'active']
+        );
         if (!$user) return null;
 
-        $token   = bin2hex(random_bytes(32));
-        $expires = date('Y-m-d H:i:s', time() + 3600);
-        Database::query('UPDATE users SET reset_token = ?, reset_expires = ? WHERE id = ?', [$token, $expires, $user['id']]);
+        $token = bin2hex(random_bytes(32));
+        Database::query(
+            'UPDATE users SET reset_token = ?, reset_expires = DATE_ADD(NOW(), INTERVAL 1 HOUR) WHERE id = ?',
+            [$token, $user['id']]
+        );
+
+        // Send reset email
+        $this->sendPasswordResetEmail($user, $token);
+
+        // Log action
+        AuditLog::log(AuditLog::ACTION_PASSWORD_RESET, $user['id'], 'user', $user['id']);
 
         return $token;
+    }
+
+    private function sendPasswordResetEmail(array $user, string $token): void
+    {
+        try {
+            $resetLink = $this->config['base_url'] . '/admin/forgot-password.php?step=reset&token=' . $token;
+            $emailData = EmailTemplate::passwordResetEmail($user, $resetLink, getSetting('site_name', 'PDF Viewer'));
+
+            EmailManager::send(
+                $user['email'],
+                $emailData['subject'],
+                $emailData['html'],
+                $emailData['plain'],
+                [],
+                emailProviderConfig()
+            );
+        } catch (Throwable $e) {
+            error_log('Failed to send password reset email: ' . $e->getMessage());
+        }
     }
 
     public function validateResetToken(string $token): array|false
@@ -244,12 +309,19 @@ class Auth
 
     private function isRateLimited(string $ip, string $email): bool
     {
-        $window  = date('Y-m-d H:i:s', time() - $this->config['login_rate_window']);
-        $count   = (int)Database::fetchScalar(
-            'SELECT COUNT(*) FROM login_attempts WHERE ip_address = ? AND attempted_at > ?',
+        $window = (int)($this->config['login_rate_window'] ?? 900);
+        $limit  = (int)($this->config['login_rate_limit'] ?? 5);
+        // Per IP, and per target account (so rotating IPs can't brute-force one
+        // account). The per-account cap is more generous to limit lockout abuse.
+        $byIp = (int)Database::fetchScalar(
+            'SELECT COUNT(*) FROM login_attempts WHERE ip_address = ? AND attempted_at > DATE_SUB(NOW(), INTERVAL ? SECOND)',
             [$ip, $window]
         );
-        return $count >= $this->config['login_rate_limit'];
+        $byEmail = (int)Database::fetchScalar(
+            'SELECT COUNT(*) FROM login_attempts WHERE email = ? AND attempted_at > DATE_SUB(NOW(), INTERVAL ? SECOND)',
+            [$email, $window]
+        );
+        return $byIp >= $limit || $byEmail >= $limit * 3;
     }
 
     private function recordFailedAttempt(string $ip, string $email): void
@@ -266,20 +338,35 @@ class Auth
     // CSRF
     // -------------------------------------------------------------------------
 
+    /**
+     * Per-session synchronizer token with a SLIDING expiry.
+     *
+     * Previously the token hard-expired csrf_token_lifetime (1h) after it was
+     * first issued and was then rotated, so any form left open for an hour —
+     * typically the PDF upload page — failed with "403 Invalid CSRF token",
+     * and every other open tab broke at the same moment. Now the expiry is
+     * pushed forward whenever a page renders a token or one is validated.
+     */
     public function generateCsrfToken(): string
     {
+        $lifetime = max(60, (int)($this->config['csrf_token_lifetime'] ?? 3600));
         if (empty($_SESSION['csrf_token']) || ($_SESSION['csrf_expires'] ?? 0) < time()) {
-            $_SESSION['csrf_token']   = bin2hex(random_bytes(32));
-            $_SESSION['csrf_expires'] = time() + $this->config['csrf_token_lifetime'];
+            $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
         }
+        $_SESSION['csrf_expires'] = time() + max($lifetime, (int)($this->config['session_lifetime'] ?? 0));
         return $_SESSION['csrf_token'];
     }
 
     public function validateCsrfToken(string $token): bool
     {
-        return isset($_SESSION['csrf_token'])
+        $ok = isset($_SESSION['csrf_token'])
+            && $token !== ''
             && hash_equals($_SESSION['csrf_token'], $token)
             && ($_SESSION['csrf_expires'] ?? 0) >= time();
+        if ($ok) {
+            $this->generateCsrfToken(); // slide the expiry
+        }
+        return $ok;
     }
 
     // -------------------------------------------------------------------------

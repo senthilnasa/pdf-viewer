@@ -59,7 +59,7 @@ $weekdays = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Analytics — <?= e($siteName) ?></title>
     <link rel="stylesheet" href="../assets/css/admin.css">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
     <style>
         /* ── Cloudflare-style stat cards ── */
         .cf-stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:1rem; margin-bottom:1.5rem; }
@@ -313,6 +313,9 @@ $weekdays = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 
 <script>
 document.addEventListener('DOMContentLoaded', function () {
+    // Chart.js comes from a CDN: if it failed to load (offline, blocked), skip
+    // the charts instead of throwing and breaking the rest of the page.
+    if (typeof Chart === 'undefined') { console.warn('Chart.js not available — charts disabled'); return; }
     const viewsData  = <?= json_encode($viewsData) ?>;
     const hourlyData = <?= json_encode($hourlyViews) ?>;
     const rolesData  = <?= json_encode(array_values($userStats['by_role'])) ?>;

@@ -25,7 +25,7 @@ $siteName   = getSetting('site_name', $config['site_name']);
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dashboard — <?= e($siteName) ?></title>
     <link rel="stylesheet" href="../assets/css/admin.css">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
 </head>
 <body class="admin-layout">
 
@@ -157,6 +157,9 @@ $siteName   = getSetting('site_name', $config['site_name']);
 
 <script>
 document.addEventListener('DOMContentLoaded', function () {
+    // Chart.js comes from a CDN: if it failed to load (offline, blocked), skip
+    // the charts instead of throwing and breaking the rest of the page.
+    if (typeof Chart === 'undefined') { console.warn('Chart.js not available — charts disabled'); return; }
     const viewsData = <?= json_encode($viewsData) ?>;
     const ctx = document.getElementById('viewsChart');
     if (!ctx) return;

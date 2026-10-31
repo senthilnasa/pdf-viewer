@@ -47,7 +47,7 @@ $printMode = get('print') === '1';
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Reports — <?= e($siteName) ?></title>
     <link rel="stylesheet" href="../assets/css/admin.css">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
     <style>
         /* ── User stat cards ── */
         .user-stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:1rem; }
@@ -277,7 +277,8 @@ document.addEventListener('DOMContentLoaded', function () {
     /* ── Users donut ── */
     const uCtx = document.getElementById('usersDonut');
     const rolesData = <?= json_encode(array_values($userStats['by_role'])) ?>;
-    if (uCtx && rolesData.length) {
+    // Chart.js comes from a CDN: if it failed to load, skip charts instead of throwing
+    if (uCtx && rolesData.length && typeof Chart !== 'undefined') {
         const cols = { admin:'#e53e3e', editor:'#d69e2e', viewer:'#3182ce' };
         new Chart(uCtx, {
             type: 'doughnut',

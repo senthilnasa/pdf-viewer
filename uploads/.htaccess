@@ -1,11 +1,46 @@
-# Deny direct PHP execution in uploads directory
-<FilesMatch "\.php$">
-    Order allow,deny
+# ------------------------------------------------------------------
+# uploads/ — stored PDFs and branding images
+#
+# PDFs are streamed ONLY through api/serve-pdf.php, which enforces
+# visibility, share-link tokens and the download setting. Serving them
+# directly from here would bypass all of that (private documents and
+# "download disabled" files could be fetched by URL).
+# Images (logo / favicon / app icon) are public.
+# ------------------------------------------------------------------
+
+Options -Indexes -ExecCGI
+
+# Never execute scripts from this directory
+<IfModule mod_php.c>
+    php_flag engine off
+</IfModule>
+RemoveHandler .php .phtml .phar .php3 .php4 .php5 .php7 .php8 .pht .phps .cgi .pl .py
+RemoveType .php .phtml .phar .php3 .php4 .php5 .php7 .php8 .pht .phps
+
+# Deny everything by default (Apache 2.4 and 2.2 syntax) …
+<IfModule mod_authz_core.c>
+    Require all denied
+</IfModule>
+<IfModule !mod_authz_core.c>
+    Order deny,allow
     Deny from all
+</IfModule>
+
+# … then allow only image files (branding assets)
+<FilesMatch "\.(?i:png|jpe?g|gif|webp|svg|ico)$">
+    <IfModule mod_authz_core.c>
+        Require all granted
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Allow from all
+    </IfModule>
 </FilesMatch>
 
-# Only allow PDF and image files
-<FilesMatch "\.(pdf|png|jpg|jpeg|gif|svg|webp)$">
-    Order allow,deny
-    Allow from all
-</FilesMatch>
+# SVGs can carry scripts — render them inert if opened directly
+<IfModule mod_headers.c>
+    <FilesMatch "\.(?i:svg)$">
+        Header set Content-Security-Policy "default-src 'none'; style-src 'unsafe-inline'; sandbox"
+    </FilesMatch>
+    Header set X-Content-Type-Options "nosniff"
+</IfModule>

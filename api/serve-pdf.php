@@ -31,8 +31,26 @@ if (!$pdf) {
 // Access control
 if ($pdf['visibility'] === 'private') {
     if ($token) {
-        $link = $pdfManager->validateShareLink($token);
+        // Read-only check — do NOT re-verify the password here (this endpoint
+        // is hit repeatedly by range requests while the PDF loads) and do NOT
+        // increment view_count here (that happens once, at the viewer page
+        // level, in viewer/index.php). Password-protected links instead rely
+        // on the session flag set once the visitor cleared the password gate.
+        $link = $pdfManager->getShareLinkByToken($token);
         if (!$link || (int)$link['pdf_id'] !== $pdfId) {
+            http_response_code(403);
+            exit('Access denied.');
+        }
+        $check = $pdfManager->checkShareLink($link);
+        $passwordOk = !$link['password'] || !empty($_SESSION['share_verified'][$token]);
+        // The viewer page counts the view *before* PDF.js requests the file,
+        // so the last permitted view would otherwise hit "limit_reached" here
+        // and never load. Allow it when this session was granted that view.
+        $allowedReasons = ['invalid_password'];
+        if (!empty($_SESSION['share_granted'][$token])) {
+            $allowedReasons[] = 'limit_reached';
+        }
+        if ((!$check['ok'] && !in_array($check['reason'], $allowedReasons, true)) || !$passwordOk) {
             http_response_code(403);
             exit('Access denied.');
         }
@@ -69,9 +87,18 @@ $end   = $fileSize - 1;
 
 if (isset($_SERVER['HTTP_RANGE'])) {
     $range = $_SERVER['HTTP_RANGE'];
-    if (preg_match('/bytes=(\d*)-(\d*)/i', $range, $m)) {
-        $start = $m[1] !== '' ? (int)$m[1] : 0;
-        $end   = $m[2] !== '' ? (int)$m[2] : $fileSize - 1;
+    if (preg_match('/bytes=(\d*)-(\d*)/i', $range, $m) && ($m[1] !== '' || $m[2] !== '')) {
+        if ($m[1] === '') {
+            // Suffix range "bytes=-N" means the LAST N bytes, not bytes 0..N.
+            $start = max(0, $fileSize - (int)$m[2]);
+            $end   = $fileSize - 1;
+        } else {
+            $start = (int)$m[1];
+            $end   = $m[2] !== '' ? (int)$m[2] : $fileSize - 1;
+        }
+        // A range end past EOF must be clamped, otherwise Content-Length
+        // advertises more bytes than are sent and the client hangs/errors.
+        $end = min($end, $fileSize - 1);
     }
     if ($start > $end || $start >= $fileSize) {
         http_response_code(416);

@@ -8,12 +8,22 @@ require ROOT . '/includes/helpers.php';
 
 $config = bootstrap();
 
-// Redirect if already logged in
-if ($auth->isLoggedIn()) {
-    redirect($config['base_url'] . '/admin/');
+// Post-login destination: only same-site absolute paths ("/pdf/x?token=…"),
+// never "//evil.com" or "https://…" (open redirect).
+$redirectTo = (string)(post('redirect', '') ?: get('redirect', ''));
+if ($redirectTo === '' || $redirectTo[0] !== '/' || str_starts_with($redirectTo, '//')
+    || str_contains($redirectTo, '\\') || preg_match('/[\r\n]/', $redirectTo)) {
+    $redirectTo = '';
+}
+$afterLogin = $redirectTo !== '' ? $redirectTo : $config['base_url'] . '/admin/';
+
+// Redirect if already logged in (and the account is still active)
+if ($auth->isLoggedIn() && $auth->currentUser()) {
+    redirect($afterLogin);
 }
 
-$error = '';
+// Errors passed back from the Google OAuth callback (escaped on output)
+$error = is_string(get('error', '')) ? mb_substr(get('error', ''), 0, 200) : '';
 $success = '';
 
 // Process login
@@ -25,7 +35,7 @@ if (isPost()) {
 
     $result = $auth->login($email, $password, $ip);
     if ($result['success']) {
-        redirect($config['base_url'] . '/admin/');
+        redirect($afterLogin);
     } else {
         $error = $result['error'];
     }
@@ -88,6 +98,7 @@ $googleEnabled = getSetting('google_oauth_enabled', false);
 
         <form method="POST">
             <?= csrfField() ?>
+            <?php if ($redirectTo !== ''): ?><input type="hidden" name="redirect" value="<?= e($redirectTo) ?>"><?php endif; ?>
             <div class="form-group">
                 <label class="form-label">Email Address</label>
                 <input type="email" name="email" class="form-control" required autofocus

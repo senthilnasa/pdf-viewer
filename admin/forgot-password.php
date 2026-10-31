@@ -20,16 +20,12 @@ if (isPost()) {
         if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
             $error = 'Invalid email.';
         } else {
-            $resetToken = $auth->generateResetToken($email);
-            // In production: send email. For now, display the link (demo-friendly).
-            $resetUrl = $config['base_url'] . '/admin/forgot-password.php?step=reset&token=' . ($resetToken ?? '');
-            if ($resetToken) {
-                $success = 'Password reset link generated. In production this would be emailed. <br>
-                    <a href="' . e($resetUrl) . '">Click here to reset your password</a>';
-            } else {
-                // Don't reveal if email exists
-                $success = 'If that email exists, a reset link has been sent.';
-            }
+            // The token is only ever delivered by email. It used to be printed
+            // on this page, which let ANY visitor reset ANY account's password
+            // (including the admin's) just by typing its email address. The
+            // response is also identical whether or not the account exists.
+            $auth->generateResetToken($email);
+            $success = 'If an account exists for that email, a password reset link has been sent to it.';
         }
     } elseif ($step === 'reset') {
         $token       = post('token') ?: $token;
@@ -46,7 +42,7 @@ if (isPost()) {
                 $error = 'Invalid or expired reset link.';
             } else {
                 $auth->resetPassword($user['id'], $newPassword);
-                $success = 'Password updated! <a href="login.php">Login now</a>';
+                $success = 'Password updated!';
             }
         }
     }
@@ -72,8 +68,8 @@ if (isPost()) {
 <div class="login-card">
     <div class="login-header"><h1>Reset Password</h1></div>
     <div class="login-body">
-        <?php if ($error): ?><div class="alert alert-error"><?= $error ?></div><?php endif; ?>
-        <?php if ($success): ?><div class="alert alert-success"><?= $success ?></div>
+        <?php if ($error): ?><div class="alert alert-error"><?= e($error) ?></div><?php endif; ?>
+        <?php if ($success): ?><div class="alert alert-success"><?= e($success) ?><?php if ($step === 'reset'): ?> <a href="login.php">Login now</a><?php endif; ?></div>
         <?php elseif ($step === 'request'): ?>
         <form method="POST">
             <?= csrfField() ?>

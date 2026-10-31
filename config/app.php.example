@@ -27,6 +27,26 @@ return [
     'enable_download'           => true,
     'enable_flipbook'           => false,
 
+    // Email / SMTP Configuration
+    'email_provider'            => 'smtp', // 'smtp' or 'null' for demo/testing
+    'email_from'                => 'noreply@example.com',
+    'email_from_name'           => 'PDF Viewer',
+    'smtp_host'                 => 'smtp.mailtrap.io', // or your SMTP server
+    'smtp_port'                 => 587,
+    'smtp_username'             => '',
+    'smtp_password'             => '',
+    'smtp_encryption'           => 'tls', // 'tls' or 'ssl'
+
+    // Storage Configuration
+    'storage_driver'            => 'local', // 'local', 's3', 'cloudflare_r2'
+    's3_key'                    => '',
+    's3_secret'                 => '',
+    's3_bucket'                 => '',
+    's3_region'                 => 'us-east-1',
+    'cloudflare_r2_token'       => '',
+    'cloudflare_r2_bucket'      => '',
+    'cloudflare_r2_domain'      => '',
+
     // Analytics
     'analytics_enabled'         => true,
     'ga_measurement_id'         => '', // Google Analytics 4 ID e.g. G-XXXXXXXXXX
@@ -36,7 +56,13 @@ return [
     'session_lifetime'          => 7200,  // seconds
     'login_rate_limit'          => 5,     // max attempts
     'login_rate_window'         => 900,   // 15 minutes in seconds
-    'csrf_token_lifetime'       => 3600,
+    'csrf_token_lifetime'       => 3600,  // sliding: renewed while the user is active
+    // Which peers may set X-Forwarded-For / CF-Connecting-IP (used for login
+    // rate limiting, analytics and audit logs):
+    //   'auto' = trust them only when REMOTE_ADDR is a private/loopback address
+    //   []     = never (use when the app is exposed directly, not behind a proxy)
+    //   ['127.0.0.1', '10.0.0.0/8'] = only these proxies
+    'trusted_proxies'           => 'auto',
 
     // Demo / Test Mode
     'demo_mode'                 => false,

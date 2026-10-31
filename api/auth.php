@@ -16,6 +16,18 @@ $dbRedirectUri  = getSetting('google_redirect_uri', '');
 if ($dbClientId)     $config['google_oauth_client_id']     = $dbClientId;
 if ($dbClientSecret) $config['google_oauth_client_secret'] = $dbClientSecret;
 if ($dbRedirectUri)  $config['google_oauth_redirect_uri']  = $dbRedirectUri;
+// Allowed-domain restriction is edited in Settings (stored in the DB) — it
+// was never passed to Auth, so the restriction was silently ignored.
+$dbAllowedDomains = getSetting('google_allowed_domains', null);
+if (is_array($dbAllowedDomains)) {
+    $config['google_allowed_domains'] = array_values(array_filter(array_map(
+        fn($d) => strtolower(trim((string)$d)),
+        $dbAllowedDomains
+    )));
+}
+if (empty($config['google_oauth_redirect_uri'])) {
+    $config['google_oauth_redirect_uri'] = $config['base_url'] . '/api/auth.php?action=google_callback';
+}
 
 // Rebuild auth with updated config
 $auth = new Auth($config);
@@ -31,6 +43,9 @@ switch ($action) {
         break;
 
     case 'google_callback':
+        if (!getSetting('google_oauth_enabled', false)) {
+            redirect($config['base_url'] . '/admin/login.php');
+        }
         $code  = get('code', '');
         $state = get('state', '');
         $result = $auth->handleGoogleCallback($code, $state);

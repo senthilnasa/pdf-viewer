@@ -69,13 +69,17 @@ async function routeCdn(context) {
     check('delete → confirm Cancel keeps the PDF', rowsAfterCancel === rowsBefore, `${rowsBefore} -> ${rowsAfterCancel}`);
 
     page.once('dialog', (d) => d.accept());
-    await page.locator('form[data-ajax] button.btn-danger').first().click();
-    await page.waitForTimeout(2500);
-    await page.reload();
+    // the app reloads the list itself after a successful delete
+    await Promise.all([
+        page.waitForNavigation({ timeout: 15000 }),
+        page.locator('form[data-ajax] button.btn-danger').first().click(),
+    ]);
+    await page.waitForLoadState('load');
     const rowsAfterOk = await page.locator('table tbody tr').count();
     check('delete → confirm OK deletes the PDF', rowsAfterOk === rowsBefore - 1, `${rowsBefore} -> ${rowsAfterOk}`);
 
     // ---- toast renders server messages as text (no HTML injection)
+    await page.waitForFunction(() => typeof window.showToast === 'function');
     await page.evaluate(() => window.showToast('<img src=x onerror="window.__xss=1">', 'error'));
     await page.waitForTimeout(300);
     check('toast does not interpret HTML', !(await page.evaluate(() => window.__xss)));
@@ -90,6 +94,43 @@ async function routeCdn(context) {
         || ((resp.request().postData() || '').match(/name="_action"\r\n\r\n(\w+)/) || [])[1];
     const json = await resp.json().catch(() => ({}));
     check('Enter key in settings submits "save", not "take_snapshot"', action === 'save' && /Settings saved/.test(json.message || ''), `${action} / ${json.message}`);
+
+    // ---- Large PDF through the real upload form (chunked; PHP limit is 1 MB)
+    {
+        // Structurally valid PDF (xref + trailer) padded with a 6 MB comment
+        const objs = [
+            '<< /Type /Catalog /Pages 2 0 R >>',
+            '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+            '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] >>',
+        ];
+        let body = '%PDF-1.4\n%' + 'x'.repeat(6 * 1024 * 1024) + '\n';
+        const offs = [];
+        objs.forEach((o, i) => { offs.push(body.length); body += `${i + 1} 0 obj\n${o}\nendobj\n`; });
+        const xref = body.length;
+        body += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n`
+            + offs.map((o) => String(o).padStart(10, '0') + ' 00000 n \n').join('')
+            + `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+        const pdf = Buffer.from(body, 'latin1');
+        await page.goto(`${BASE}/admin/pdfs.php?action=upload`);
+        await page.setInputFiles('input[name=pdf_file]', { name: 'large.pdf', mimeType: 'application/pdf', buffer: pdf });
+        await page.fill('input[name=title]', 'Browser Large Upload');
+        await page.selectOption('select[name=show_in_catalog]', '0');
+        let sawProgress = false;
+        const poll = setInterval(async () => {
+            try { if (/Uploading \d+%/.test(await page.locator('button[type=submit]').innerText())) sawProgress = true; } catch (_) {}
+        }, 100);
+        const chunkReqs = [];
+        page.on('request', (r) => { if (r.method() === 'POST' && /chunk_append/.test(r.postData() || '')) chunkReqs.push(r); });
+        await Promise.all([
+            page.waitForURL(/pdfs\.php$/, { timeout: 60000 }),
+            page.click('button[type=submit]'),
+        ]);
+        clearInterval(poll);
+        const listed = await page.locator('td strong', { hasText: 'Browser Large Upload' }).count();
+        check('6 MB PDF uploads via the form in chunks (with progress)', listed === 1 && chunkReqs.length >= 6,
+            `listed=${listed} chunks=${chunkReqs.length} progress=${sawProgress}`);
+        check('upload progress shown on the button', sawProgress);
+    }
 
     // ---- Viewer + flipbook
     // enable flipbook (button is hidden when the setting is off)

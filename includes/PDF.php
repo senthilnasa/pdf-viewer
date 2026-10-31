@@ -183,10 +183,26 @@ class PDF
     // File upload
     // -------------------------------------------------------------------------
 
+    /**
+     * Largest PDF the admin UI accepts. Uploads are sent in chunks (see
+     * ChunkedUpload), so this is the app limit — not PHP's post_max_size.
+     */
     public function maxUploadSize(): int
     {
-        $appLimit = (int)($this->config['max_upload_size'] ?? 50 * 1024 * 1024);
-        return function_exists('effectiveUploadLimit') ? effectiveUploadLimit($appLimit) : $appLimit;
+        return (int)($this->config['max_upload_size'] ?? 50 * 1024 * 1024);
+    }
+
+    /** Validate + store a file assembled by ChunkedUpload::finalize(). */
+    public function handleChunkedUpload(array $assembled): array
+    {
+        if (empty($assembled['success'])) {
+            return ['success' => false, 'error' => $assembled['error'] ?? 'Upload failed.'];
+        }
+        $result = $this->storeValidatedFile($assembled['path'], (int)$assembled['size'], false);
+        if (!$result['success']) {
+            @unlink($assembled['path']); // rejected (e.g. not a PDF) — don't leave it behind
+        }
+        return $result;
     }
 
     public function handleUpload(array $file): array
@@ -213,6 +229,13 @@ class PDF
             return ['success' => false, 'error' => 'Invalid upload.'];
         }
 
+        return $this->storeValidatedFile($file['tmp_name'], (int)$file['size'], true);
+    }
+
+    /** Shared validation + storage for direct and chunked uploads. */
+    private function storeValidatedFile(string $srcPath, int $size, bool $isHttpUpload): array
+    {
+        $file = ['tmp_name' => $srcPath, 'size' => $size];
         if ($file['size'] <= 0) {
             return ['success' => false, 'error' => 'The uploaded file is empty.'];
         }
@@ -239,9 +262,13 @@ class PDF
         $filename  = date('Ymd_His_') . bin2hex(random_bytes(4)) . '.pdf';
         $destPath  = $uploadDir . $filename;
 
-        if (!move_uploaded_file($file['tmp_name'], $destPath)) {
+        $moved = $isHttpUpload
+            ? move_uploaded_file($file['tmp_name'], $destPath)
+            : @rename($file['tmp_name'], $destPath);
+        if (!$moved) {
             return ['success' => false, 'error' => 'Failed to save uploaded file.'];
         }
+        @chmod($destPath, 0644);
 
         return [
             'success'   => true,

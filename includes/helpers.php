@@ -32,6 +32,9 @@ function bootstrap(): array
     if (!class_exists('Category')) {
         require_once ROOT . '/includes/Category.php';
     }
+    if (!class_exists('ChunkedUpload')) {
+        require_once ROOT . '/includes/ChunkedUpload.php';
+    }
 
     $appConfig = ROOT . '/config/app.php';
     $base      = rtrim(dirname($_SERVER['SCRIPT_NAME'] ?? ''), '/');

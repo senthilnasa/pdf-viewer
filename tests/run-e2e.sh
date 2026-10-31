@@ -38,8 +38,13 @@ tar -C "$SRC" --exclude=.git --exclude='config/app.php' --exclude='config/databa
     --exclude='config/install.lock' --exclude='uploads/*.pdf' -cf - . | tar -C "$APP_DIR" -xf -
 
 # Small PHP limits on purpose: lets the suite exercise the "upload larger
-# than post_max_size" path that used to surface as a 403.
+# than post_max_size" path that used to surface as a 403 — and forces large
+# PDFs through the chunked upload path.
+# (zlib.output_compression is deliberately NOT enabled: PHP's built-in server
+#  hangs when serving static .js/.css files with it on — a dev-server quirk;
+#  Apache/nginx serve static files without PHP.)
 php -d upload_max_filesize=1M -d post_max_size=1M -d display_errors=0 -d log_errors=1 \
+    -d output_buffering=4096 \
     -d error_log="$WORK/php-errors.log" -d error_reporting=E_ALL \
     -S "127.0.0.1:$PORT" -t "$APP_DIR" "$APP_DIR/router.php" >"$WORK/server.log" 2>&1 &
 SERVER_PID=$!

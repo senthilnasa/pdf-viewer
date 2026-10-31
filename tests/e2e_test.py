@@ -242,13 +242,90 @@ def test_uploads(c):
     return row
 
 
+def chunk_post(c, fields, chunk=None):
+    tok = c.csrf("/admin/pdfs.php?action=upload")
+    files = {"chunk": ("chunk.bin", chunk, "application/octet-stream")} if chunk is not None else None
+    if files is None:
+        return c.post("/admin/pdfs.php", {"csrf_token": tok, **fields}, ajax=True)
+    return c.req("POST", "/admin/pdfs.php", data={"csrf_token": tok, **fields}, files=files, ajax=True)
+
+
+def chunked_upload(c, data, chunk=900 * 1024):
+    j = jbody(chunk_post(c, {"_action": "chunk_init", "size": len(data), "name": "big.pdf"})[2])
+    assert j.get("success"), j
+    uid, off = j["upload_id"], 0
+    while off < len(data):
+        j = jbody(chunk_post(c, {"_action": "chunk_append", "upload_id": uid, "offset": off}, data[off:off + chunk])[2])
+        assert j.get("success"), j
+        off = j["received"]
+    return uid
+
+
+def test_chunked_uploads(c):
+    print("\n[Chunked uploads (fix for 408 Request Timeout on large PDFs)]")
+    big = make_pdf(pad=5 * 1024 * 1024)          # ~5 MB, server PHP limit is 1 MB
+    s, _, b = c.get("/admin/pdfs.php?action=upload")
+    m = re.search(rb'data-chunk-bytes="(\d+)"', b)
+    check("upload form advertises a chunk size below the PHP limit", m and int(m.group(1)) < 1024 * 1024, m and m.group(1))
+    check("upload form advertises the app limit (50 MB), not PHP's 1 MB", b'data-max-bytes="52428800"' in b)
+
+    uid = chunked_upload(c, big)
+    tok = c.csrf("/admin/pdfs.php?action=upload")
+    s, _, b = c.post("/admin/pdfs.php?action=upload", {"csrf_token": tok, "_action": "upload", "title": "Big Chunked",
+                     "visibility": "public", "enable_download": "1", "show_in_catalog": "0", "category_id": "",
+                     "chunk_upload_id": uid}, ajax=True)
+    check("5 MB PDF uploads in chunks through a 1 MB PHP limit", jbody(b).get("success"), b[:200])
+    row = sql("SELECT * FROM pdf_documents WHERE title='Big Chunked'")
+    ok = bool(row) and open(row[0]["file_path"], "rb").read() == big
+    check("assembled file is byte-identical", ok)
+    if row:
+        s, h, body = Client().get(f"/api/serve-pdf.php?id={row[0]['id']}", headers={"Range": f"bytes={len(big) - 100}-"})
+        check("assembled file served (range at the end)", s == 206 and body == big[-100:], s)
+    s, _, b = c.post("/admin/pdfs.php?action=upload", {"csrf_token": tok, "_action": "upload", "title": "Replay",
+                     "visibility": "public", "enable_download": "1", "show_in_catalog": "0", "category_id": "",
+                     "chunk_upload_id": uid}, ajax=True)
+    check("a finalised upload id cannot be replayed", not jbody(b).get("success"), b[:200])
+
+    # Retry of an already-stored chunk (lost response) is acknowledged, not duplicated
+    data = make_pdf(pad=2 * 1024 * 1024)
+    j = jbody(chunk_post(c, {"_action": "chunk_init", "size": len(data), "name": "r.pdf"})[2])
+    uid = j["upload_id"]
+    part = data[:500 * 1024]
+    a = jbody(chunk_post(c, {"_action": "chunk_append", "upload_id": uid, "offset": 0}, part)[2])
+    a2 = jbody(chunk_post(c, {"_action": "chunk_append", "upload_id": uid, "offset": 0}, part)[2])
+    check("duplicate chunk acknowledged without double-append", a.get("received") == a2.get("received") == len(part), (a, a2))
+    gap = jbody(chunk_post(c, {"_action": "chunk_append", "upload_id": uid, "offset": len(part) + 1000}, part)[2])
+    check("out-of-order chunk → server tells client where to resume", gap.get("resume_from") == len(part), gap)
+
+    s, _, b = chunk_post(c, {"_action": "chunk_append", "upload_id": "../../config/x", "offset": 0}, b"x")
+    check("malformed upload id rejected (no path traversal)", not jbody(b).get("success"), b[:150])
+
+    j = jbody(chunk_post(c, {"_action": "chunk_init", "size": 60 * 1024 * 1024, "name": "huge.pdf"})[2])
+    check("file over the app limit refused before any data is sent", not j.get("success") and "maximum size" in j.get("message", ""), j)
+
+    fake = b"<?php system($_GET[1]); ?>" + b"A" * 300000
+    uid = chunked_upload(c, fake)
+    tok = c.csrf("/admin/pdfs.php?action=upload")
+    s, _, b = c.post("/admin/pdfs.php?action=upload", {"csrf_token": tok, "_action": "upload", "title": "Fake",
+                     "visibility": "public", "enable_download": "1", "show_in_catalog": "0", "category_id": "",
+                     "chunk_upload_id": uid}, ajax=True)
+    check("non-PDF content rejected after assembly", "Only PDF" in jbody(b).get("message", ""), b[:200])
+    check("rejected assembled file is deleted", not os.path.exists(f"{APP}/uploads/.chunks/{uid}.part"))
+    s, _, _ = Client().get(f"/uploads/.chunks/{uid}.part")
+    check("chunk directory not web-accessible", s == 403, s)
+
+
 def test_serve(row):
     print("\n[PDF serving / range requests]")
     c = Client()
     size = len(make_pdf())
     s, h, b = c.get(f"/api/serve-pdf.php?id={row['id']}")
     check("full PDF served", s == 200 and b.startswith(b"%PDF") and len(b) == size, (s, len(b)))
-    s, h, b = c.get(f"/api/serve-pdf.php?id={row['id']}", headers={"Range": "bytes=0-99"})
+    s, h, b = c.get(f"/api/serve-pdf.php?id={row['id']}", headers={"Accept-Encoding": "gzip"})
+    check("PDF stream not re-compressed by zlib.output_compression (length matches)",
+          s == 200 and h.get("Content-Encoding") is None and b.startswith(b"%PDF") and len(b) == size,
+          (s, h.get("Content-Encoding"), len(b)))
+    s, h, b = c.get(f"/api/serve-pdf.php?id={row['id']}", headers={"Accept-Encoding": "gzip", "Range": "bytes=0-99"})
     check("range 0-99 → 206 / 100 bytes", s == 206 and len(b) == 100, (s, len(b)))
     s, h, b = c.get(f"/api/serve-pdf.php?id={row['id']}", headers={"Range": "bytes=-50"})
     check("suffix range -50 → last 50 bytes", s == 206 and len(b) == 50 and b.endswith(b"%%EOF\n"), (s, len(b)))
@@ -449,6 +526,7 @@ def main():
     test_serve(row)
     test_private_and_share(c)
     test_admin_features(c)
+    test_chunked_uploads(c)
     test_cli()
     test_rate_limit()
     test_php_log()

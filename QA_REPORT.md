@@ -2,7 +2,7 @@
 
 **Scope:** full audit of `senthilnasa/pdf-viewer` (upstream commit `47f3a97`), covering PHP back end, JavaScript front end, SQL schema and migrations, installer, Docker and cron.
 **Environment:** PHP 8.3.6 CLI and built-in server (`router.php`), MariaDB 10.11, Chromium (Playwright).
-**Result:** **89 / 89** automated checks pass: 75 HTTP/DB end-to-end and 14 browser.
+**Result:** **105 / 105** automated checks pass: 89 HTTP/DB end-to-end and 16 browser.
 
 ---
 
@@ -27,6 +27,17 @@
 | **Verified** | Fresh install → lock created. GET and POST → 403. Lock deleted → auto-relocked. `config/` is not web-reachable. |
 
 ---
+
+### 1.3 Follow-up: 40 MB upload → 408 Request Timeout
+
+| | |
+|---|---|
+| **Root cause** | 408 is sent by the **web server or a proxy in front of PHP** when a request body doesn't arrive within its timeout: Apache `mod_reqtimeout` (enabled by default in the Docker image), nginx `client_body_timeout`, LiteSpeed or hosting-panel limits, or a CDN. A 40 MB PDF sent as one request takes long enough on an ordinary uplink to trip these, and PHP never sees the request, so no PHP setting can fix it. |
+| **Fix: chunked, resumable uploads** | `includes/ChunkedUpload.php` plus `admin-ajax.js`. The browser sends the PDF in ≤ 2 MB pieces, sized to the server's PHP limits. Each piece is retried with backoff on network errors, 408, 429 or 5xx. The upload button shows progress. The server appends each piece under an exclusive lock and checks its offset. A retried piece that already arrived is acknowledged rather than appended twice. A gap makes the server tell the client where to resume. The finished file goes through the **same validation** as before (size, real MIME sniffing) and is moved into place atomically. Rejected files are deleted. |
+| **Security** | Upload IDs are 128-bit random values bound to the user who started the upload. They are format-checked (no path traversal) and single-use, and every request is CSRF- and role-checked. Pieces live in `uploads/.chunks/`, which is not web-accessible. Abandoned uploads are purged after 24 h (by `cron.php` and on each new upload). The file-size cap is checked before any data is sent. |
+| **Side benefits** | Uploads now also work behind small body-size limits (nginx's 1 MB default, CDN caps) and on hosts with PHP's 2 MB `upload_max_filesize` default. A form re-submitted after a validation error (e.g. slug taken) re-uses the already uploaded file instead of sending it again. |
+| **Verified** | 13 new HTTP checks and 2 browser checks. A 5–6 MB PDF uploaded through a **1 MB PHP limit**, through the API and through the real form with progress. The assembled file is byte-identical and is served correctly including range requests. Also covered: replay blocked, duplicate-piece idempotency, out-of-order resume, malformed IDs, over-limit refusal, non-PDF rejection and cleanup, and the chunk directory not being web-reachable. |
+| **Not verifiable here** | I can't reproduce your server's exact 408 (I don't know which web server or proxy it is). The fix removes the cause for any of them, because no single request is large or long-running any more. |
 
 ## 2. All bugs found and fixed
 

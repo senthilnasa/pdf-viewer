@@ -95,11 +95,12 @@ try {
     if ($now - (int)getSetting('cron_last_cleanup', 0) >= 86400) {
         $deletedTasks = Scheduler::cleanupOldTasks(30);
         $deletedNotes = Notification::deleteExpired();
+        $deletedParts = (new ChunkedUpload($config['upload_directory'], PHP_INT_MAX))->purgeStale();
         setSetting('cron_last_cleanup', $now, 'integer');
         $tasks[] = [
             'task'    => 'cleanup',
             'status'  => 'ok',
-            'message' => "Removed {$deletedTasks} old job(s) and {$deletedNotes} expired notification(s).",
+            'message' => "Removed {$deletedTasks} old job(s), {$deletedNotes} expired notification(s) and {$deletedParts} abandoned upload(s).",
         ];
     }
 } catch (Throwable $e) {

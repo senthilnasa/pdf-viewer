@@ -27,6 +27,31 @@ if (isPost()) {
     verifyCsrf();
     $isAjax     = strtolower($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') === 'xmlhttprequest';
     $postAction = post('_action');
+    $chunker    = new ChunkedUpload($config['upload_directory'], $pdfManager->maxUploadSize());
+
+    // ── Chunked upload endpoints (used by admin-ajax.js for every PDF) ──
+    // Each request carries ≤ 2 MB, so large PDFs no longer hit server
+    // request timeouts (408) or body-size limits (413).
+    if ($postAction === 'chunk_init') {
+        json_response($chunker->init((int)$user['id'], (int)post('size', 0), (string)post('name', '')));
+    }
+    if ($postAction === 'chunk_append') {
+        json_response($chunker->append(
+            (int)$user['id'],
+            (string)post('upload_id', ''),
+            (int)post('offset', -1),
+            $_FILES['chunk'] ?? []
+        ));
+    }
+
+    // A file sent in chunks arrives as an upload id instead of $_FILES
+    $chunkId  = (string)post('chunk_upload_id', '');
+    $hasFile  = !empty($_FILES['pdf_file']['name']) || $chunkId !== '';
+    $receiveUpload = function () use ($chunkId, $chunker, $pdfManager, $user): array {
+        return $chunkId !== ''
+            ? $pdfManager->handleChunkedUpload($chunker->finalize((int)$user['id'], $chunkId))
+            : $pdfManager->handleUpload($_FILES['pdf_file']);
+    };
 
     // Upload new PDF
     if ($postAction === 'upload') {
@@ -47,14 +72,14 @@ if (isPost()) {
             $error = 'Slug may only contain letters, numbers and dashes.';
         } elseif ($customSlug !== '' && !$pdfManager->isUniqueSlug($customSlug)) {
             $error = 'Slug already in use. Please choose a different slug.';
-        } elseif (empty($_FILES['pdf_file']['name'])) {
+        } elseif (!$hasFile) {
             $error = 'Please select a PDF file.';
         } elseif ($showInCatalog && !$categoryId) {
             $error = 'Select a category for documents shown in the catalog.';
         } elseif ($categoryId && !$categoryMgr->getById($categoryId)) {
             $error = 'Selected category does not exist.';
         } else {
-            $upload = $pdfManager->handleUpload($_FILES['pdf_file']);
+            $upload = $receiveUpload();
             if (!$upload['success']) {
                 $error = $upload['error'];
             } else {
@@ -125,8 +150,8 @@ if (isPost()) {
 
         // Handle file replacement (only after all validation passed, so a
         // rejected edit no longer deletes/replaces the existing file)
-        if (!$error && !empty($_FILES['pdf_file']['name'])) {
-            $upload = $pdfManager->handleUpload($_FILES['pdf_file']);
+        if (!$error && $hasFile) {
+            $upload = $receiveUpload();
             if (!$upload['success']) {
                 $error = $upload['error'];
             } else {
@@ -340,7 +365,9 @@ function renderCategoryOptions(array $categoryOptions, ?int $selectedId): string
 
                 <div class="form-group">
                     <label class="form-label">PDF File *</label>
-                    <input type="file" name="pdf_file" class="form-control" accept=".pdf,application/pdf" required data-max-bytes="<?= $pdfManager->maxUploadSize() ?>">
+                    <input type="file" name="pdf_file" class="form-control" accept=".pdf,application/pdf" required
+                           data-max-bytes="<?= $pdfManager->maxUploadSize() ?>"
+                           data-chunk-url="pdfs.php" data-chunk-bytes="<?= ChunkedUpload::chunkSize() ?>">
                     <small class="text-muted">Max: <?= $pdfManager->humanFileSize($pdfManager->maxUploadSize()) ?></small>
                 </div>
                 <div class="form-group">
@@ -423,7 +450,9 @@ function renderCategoryOptions(array $categoryOptions, ?int $selectedId): string
 
                 <div class="form-group">
                     <label class="form-label">Replace PDF File (optional)</label>
-                    <input type="file" name="pdf_file" class="form-control" accept=".pdf,application/pdf" data-max-bytes="<?= $pdfManager->maxUploadSize() ?>">
+                    <input type="file" name="pdf_file" class="form-control" accept=".pdf,application/pdf"
+                           data-max-bytes="<?= $pdfManager->maxUploadSize() ?>"
+                           data-chunk-url="pdfs.php" data-chunk-bytes="<?= ChunkedUpload::chunkSize() ?>">
                     <small class="text-muted">Current: <?= e(basename($pdf['file_path'])) ?> (<?= $pdfManager->humanFileSize($pdf['file_size']) ?>). Max: <?= $pdfManager->humanFileSize($pdfManager->maxUploadSize()) ?>. Leave empty to keep existing file.</small>
                 </div>
                 <div class="form-group">

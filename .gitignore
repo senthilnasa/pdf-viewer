@@ -15,6 +15,9 @@ uploads/*.gif
 uploads/*.webp
 uploads/*.svg
 
+# In-progress chunked uploads
+uploads/.chunks/
+
 # Keep the directory itself
 !uploads/.gitkeep
 !uploads/.htaccess

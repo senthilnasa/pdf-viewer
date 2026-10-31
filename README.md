@@ -756,10 +756,11 @@ The full ready-to-paste crontab commands are shown there with your actual token 
 - On shared hosting: hostname is usually `localhost`, not an IP
 - Confirm the DB user has privileges on the correct database
 
-### PDF Uploads Fail
+### PDF Uploads Fail (403 / 408 / 413)
 
-- The upload page shows the **effective** limit (the smallest of `max_upload_size`, `upload_max_filesize` and `post_max_size`). Larger files are rejected in the browser before uploading.
-- A file larger than `post_max_size` now returns a clear *"The upload is too large for this server"* message. (Previously PHP discarded the request, the CSRF token was lost, and you got **403 Invalid CSRF token**.)
+- **Uploads are chunked.** The admin UI sends PDFs in ≤ 2 MB pieces (each retried on failure) and the server reassembles them, so large files no longer hit web-server/proxy request timeouts (**408 Request Timeout** — Apache `mod_reqtimeout`, nginx `client_body_timeout`, LiteSpeed/hosting limits) or body-size limits (**413** — nginx `client_max_body_size`, CDN limits). The size limit is `max_upload_size` in `config/app.php` (default 50 MB); PHP's `post_max_size` only needs to fit one 2 MB piece.
+- Incomplete uploads are kept in `uploads/.chunks/` (not web-accessible) and purged after 24 h by `cron.php`.
+- Without JavaScript the form falls back to a single request, which is subject to the PHP limits below; a file larger than `post_max_size` then returns a clear *"The upload is too large for this server"* message instead of the old **403 Invalid CSRF token**.
 - Raise the limits:
   - Apache + mod_php: the `php_value` lines in `.htaccess`
   - **PHP-FPM / CGI (most shared hosts): `.user.ini`** in the app root (shipped with 100M / 105M); `.htaccess` `php_value` lines are ignored there
@@ -807,9 +808,9 @@ Use *Test Email Delivery* on the Settings page to verify.
 ## Running the Tests
 
 `tests/run-e2e.sh` installs a **fresh copy** of the app against a real MySQL /
-MariaDB server, then runs 75 HTTP/database checks (installer and lock, auth,
+MariaDB server, then runs 89 HTTP/database checks (installer and lock, auth, chunked
 uploads, range requests, share links, roles, CSV export, migrations, cron, rate
-limiting, PHP error log) and, when Node + Playwright are available, 14 browser
+limiting, PHP error log) and, when Node + Playwright are available, 16 browser
 checks (AJAX forms, viewer, flipbook).
 
 ```bash

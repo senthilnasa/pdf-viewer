@@ -125,6 +125,11 @@ if ($download) {
     header('Content-Disposition: inline; filename="' . $filename . '"');
 }
 
+// Stream the raw bytes: no output compression / buffering layered on top
+// (Content-Length / Content-Range describe the uncompressed file).
+@ini_set('zlib.output_compression', '0');
+while (ob_get_level() > 0) { @ob_end_clean(); }
+
 // Stream file
 $fh = fopen($filePath, 'rb');
 fseek($fh, $start);

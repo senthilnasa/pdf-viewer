@@ -140,10 +140,16 @@
                 btn.innerHTML = '<span style="opacity:.55">Saving…</span>';
             }
 
-            fetch(form.action || location.href, {
-                method:  'POST',
-                headers: { 'X-Requested-With': 'XMLHttpRequest' },
-                body:    fd,
+            // Large files are sent in small chunks first (see uploadInChunks);
+            // the form itself then only carries the resulting upload id.
+            uploadChunkedFiles(form, fd, btn)
+            .then(function () {
+                if (btn) btn.innerHTML = '<span style="opacity:.55">Saving…</span>';
+                return fetch(form.action || location.href, {
+                    method:  'POST',
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                    body:    fd,
+                });
             })
             .then(function (r) {
                 // Error responses (403 expired session, 413 upload too large…)
@@ -159,6 +165,11 @@
                 });
             })
             .then(function (data) {
+                // The server consumed (or lost) the chunked upload — next
+                // submit must send the file again.
+                if (data.success || /upload (session|is incomplete)|upload it again/i.test(data.message || '')) {
+                    form.querySelectorAll('input[type=file][data-chunk-url]').forEach(function (i) { i._chunked = null; });
+                }
                 var type = data.success ? 'success' : 'error';
                 showToast(data.message || (data.success ? 'Saved.' : 'Error.'), type);
 
@@ -181,7 +192,9 @@
                 }
             })
             .catch(function (err) {
-                showToast('Request failed. Please check your connection and try again.', 'error');
+                showToast(err && err.userMessage
+                    ? err.userMessage
+                    : 'Request failed. Please check your connection and try again.', 'error');
                 console.error('[admin-ajax]', err);
             })
             .finally(function () {
@@ -190,6 +203,103 @@
                     if (origHtml !== null) btn.innerHTML = origHtml;
                 }
             });
+        });
+    }
+
+    // ── Chunked uploads ───────────────────────────────────────────────────────
+    // A 40 MB PDF in a single request can exceed web-server / proxy request
+    // timeouts (408) or body limits (413) long before PHP sees it. Files in
+    // <input type=file data-chunk-url> are therefore sent as ≤2 MB pieces, each
+    // retried on failure; the form then submits only `chunk_upload_id`.
+    function uploadChunkedFiles(form, fd, btn) {
+        var inputs = Array.prototype.slice.call(form.querySelectorAll('input[type=file][data-chunk-url]'));
+        return inputs.reduce(function (p, input) {
+            return p.then(function () {
+                var file = input.files && input.files[0];
+                if (!file) return;
+                // Re-use a completed upload if the form is re-submitted after a
+                // validation error (e.g. slug taken) — no need to resend 40 MB.
+                var done = input._chunked;
+                var reuse = done && done.file === file
+                    ? Promise.resolve(done.id)
+                    : uploadInChunks(input, file, fd.get('csrf_token'), btn);
+                return reuse.then(function (id) {
+                    input._chunked = { file: file, id: id };
+                    fd.delete(input.name);
+                    fd.set('chunk_upload_id', id);
+                });
+            });
+        }, Promise.resolve());
+    }
+
+    function uploadInChunks(input, file, csrf, btn) {
+        var url   = input.dataset.chunkUrl;
+        var size  = Math.max(64 * 1024, parseInt(input.dataset.chunkBytes, 10) || 2 * 1024 * 1024);
+
+        function post(fields, blob) {
+            var body = new FormData();
+            body.set('csrf_token', csrf);
+            Object.keys(fields).forEach(function (k) { body.set(k, fields[k]); });
+            if (blob) body.set('chunk', blob, 'chunk.bin');
+            return fetch(url, { method: 'POST', headers: { 'X-Requested-With': 'XMLHttpRequest' }, body: body })
+                .then(function (r) {
+                    return r.text().then(function (t) {
+                        var data = null;
+                        try { data = JSON.parse(t); } catch (_) {}
+                        if (!data) {
+                            var e = new Error('HTTP ' + r.status);
+                            e.retryable = r.status === 408 || r.status === 429 || r.status >= 500 || r.status === 0;
+                            throw e;
+                        }
+                        return data;
+                    });
+                }, function (netErr) { netErr.retryable = true; throw netErr; });
+        }
+
+        function withRetry(fn, attempts) {
+            return fn().catch(function (err) {
+                if (!err.retryable || attempts <= 1) throw err;
+                var wait = (5 - attempts) * 1500;   // 1.5s, 3s, 4.5s, 6s
+                return new Promise(function (res) { setTimeout(res, wait); })
+                    .then(function () { return withRetry(fn, attempts - 1); });
+            });
+        }
+
+        function fail(msg) { var e = new Error(msg); e.userMessage = msg; throw e; }
+
+        function progress(sent) {
+            if (btn) btn.innerHTML = '<span style="opacity:.75">Uploading ' +
+                Math.min(100, Math.floor(sent / file.size * 100)) + '%…</span>';
+        }
+
+        return withRetry(function () {
+            return post({ _action: 'chunk_init', size: file.size, name: file.name });
+        }, 5).then(function (init) {
+            if (!init.success) fail(init.message || 'Upload could not be started.');
+            var id = init.upload_id;
+            if (init.chunk_size) size = Math.min(size, init.chunk_size);
+
+            function sendFrom(offset) {
+                progress(offset);
+                if (offset >= file.size) return id;
+                var blob = file.slice(offset, Math.min(offset + size, file.size));
+                return withRetry(function () {
+                    return post({ _action: 'chunk_append', upload_id: id, offset: offset }, blob).then(function (d) {
+                        if (!d.success && d.retry) { var e = new Error(d.message); e.retryable = true; throw e; }
+                        return d;
+                    });
+                }, 5).then(function (d) {
+                    if (d.success) return sendFrom(d.received);
+                    if (typeof d.resume_from === 'number') return sendFrom(d.resume_from);
+                    fail(d.message || 'Upload failed.');
+                });
+            }
+            return sendFrom(0);
+        }).catch(function (err) {
+            if (!err.userMessage) {
+                err.userMessage = 'The upload was interrupted (' + err.message + '). Please check your connection and try again.';
+            }
+            throw err;
         });
     }
 

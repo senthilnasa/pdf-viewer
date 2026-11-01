@@ -75,7 +75,7 @@ $gaId = getSetting('ga_measurement_id', '') ?: ($config['ga_measurement_id'] ?? 
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><?= e($siteName) ?></title>
     <meta name="description" content="Browse and view documents online.">
-    <link rel="stylesheet" href="assets/css/public.css">
+    <link rel="stylesheet" href="<?= asset('assets/css/public.css') ?>">
     <?php if ($gaId): ?>
     <script async src="https://www.googletagmanager.com/gtag/js?id=<?= e(rawurlencode($gaId)) ?>"></script>
     <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments)}gtag('js',new Date());gtag('config',<?= json_encode($gaId, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP) ?>);</script>

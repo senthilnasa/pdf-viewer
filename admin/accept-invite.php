@@ -57,7 +57,7 @@ if (isPost() && $user) {
     <?php require ROOT . '/admin/partials/head-meta.php'; ?>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Accept Invitation — <?= e($siteName) ?></title>
-    <link rel="stylesheet" href="../assets/css/admin.css">
+    <link rel="stylesheet" href="../<?= asset('assets/css/admin.css') ?>">
     <style>
         body { display:flex;align-items:center;justify-content:center;min-height:100vh;background:var(--bg-secondary); }
         .card { max-width:420px;width:100%; }

@@ -83,6 +83,17 @@ function e(mixed $val): string
     return htmlspecialchars((string)$val, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 }
 
+/**
+ * Versioned URL for a local asset, e.g. asset('assets/js/admin-ajax.js').
+ * Static files are cached for a month (.htaccess) and by Cloudflare, so
+ * without a version tag browsers keep running old JS after a deploy.
+ */
+function asset(string $path): string
+{
+    $mtime = @filemtime(ROOT . '/' . ltrim($path, '/'));
+    return $path . ($mtime ? '?v=' . $mtime : '');
+}
+
 function json_response(array $data, int $code = 200): never
 {
     http_response_code($code);

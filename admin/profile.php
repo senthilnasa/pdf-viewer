@@ -87,7 +87,7 @@ if (isPost()) {
     <?php require ROOT . '/admin/partials/head-meta.php'; ?>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Profile — <?= e($siteName) ?></title>
-    <link rel="stylesheet" href="../assets/css/admin.css">
+    <link rel="stylesheet" href="../<?= asset('assets/css/admin.css') ?>">
 </head>
 <body class="admin-layout">
 

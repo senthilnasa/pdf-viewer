@@ -55,7 +55,7 @@ if (isPost()) {
     <?php require ROOT . '/admin/partials/head-meta.php'; ?>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Reset Password — <?= e($siteName) ?></title>
-    <link rel="stylesheet" href="../assets/css/admin.css">
+    <link rel="stylesheet" href="../<?= asset('assets/css/admin.css') ?>">
     <style>
         body { display:flex;align-items:center;justify-content:center;min-height:100vh;background:var(--bg-secondary); }
         .login-card { background:#fff;border-radius:12px;box-shadow:0 4px 24px rgba(0,0,0,.1);width:100%;max-width:400px;overflow:hidden; }

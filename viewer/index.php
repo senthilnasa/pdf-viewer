@@ -198,7 +198,7 @@ $fileSizeHuman = $pdfManager->humanFileSize($pdf['file_size']);
     <?php if ($cfToken): ?>
     <script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='<?= e(json_encode(['token' => $cfToken])) ?>'></script>
     <?php endif; ?>
-    <link rel="stylesheet" href="../assets/css/viewer.css">
+    <link rel="stylesheet" href="../<?= asset('assets/css/viewer.css') ?>">
     <style>
     /* ================================================================
        FLIPBOOK OVERLAY — dearFlip / pdf-flip style
@@ -640,7 +640,7 @@ const VIEWER_CONFIG = {
     defaultView:    <?= json_encode($defaultView) ?>,
 };
 </script>
-<script src="../assets/js/viewer.js"></script>
+<script src="../<?= asset('assets/js/viewer.js') ?>"></script>
 
 <!-- StPageFlip — MIT licence -->
 <script src="https://cdn.jsdelivr.net/npm/page-flip@2.0.7/dist/js/page-flip.browser.js"></script>

@@ -75,8 +75,8 @@ $parents = $categoryMgr->getParents();
     <?php require ROOT . '/admin/partials/head-meta.php'; ?>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Categories — <?= e($siteName) ?></title>
-    <link rel="stylesheet" href="../assets/css/admin.css">
-    <script src="../assets/js/admin-ajax.js" defer></script>
+    <link rel="stylesheet" href="../<?= asset('assets/css/admin.css') ?>">
+    <script src="../<?= asset('assets/js/admin-ajax.js') ?>" defer></script>
     <style>
         .cat-tree { list-style: none; }
         .cat-tree > li { margin-bottom: .5rem; }

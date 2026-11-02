@@ -205,12 +205,17 @@ $fileSizeHuman = $pdfManager->humanFileSize($pdf['file_size']);
     ================================================================ */
     .fb-overlay {
         position: fixed; inset: 0; z-index: 9000;
-        background: #0d1117;
+        background: #0b0f19;
         display: flex; flex-direction: column;
         align-items: center;
         overflow: hidden;
+        animation: fbOverlayIn .25s ease-out;
     }
-    .fb-overlay.fb-hidden { display: none; }
+    .fb-overlay.fb-hidden { display: none; animation: none; }
+    @keyframes fbOverlayIn {
+        from { opacity: 0; }
+        to   { opacity: 1; }
+    }
 
     /* Top bar */
     .fb-top {
@@ -220,6 +225,8 @@ $fileSizeHuman = $pdfManager->humanFileSize($pdf['file_size']);
         background: rgba(255,255,255,.04);
         border-bottom: 1px solid rgba(255,255,255,.08);
         flex-shrink: 0;
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
     }
     .fb-top-title { color: #e2e8f0; font-size: .9rem; font-weight: 600; }
     .fb-top-actions { display: flex; gap: .5rem; }
@@ -227,29 +234,45 @@ $fileSizeHuman = $pdfManager->humanFileSize($pdf['file_size']);
         background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.12);
         color: #cbd5e0; border-radius: 6px; padding: .35rem .65rem;
         cursor: pointer; font-size: .82rem; display: flex; align-items: center; gap: .35rem;
-        transition: background .15s, color .15s;
+        transition: background .18s ease, color .18s ease, transform .18s cubic-bezier(.2,.8,.2,1), box-shadow .18s ease, border-color .18s ease;
     }
-    .fb-icon-btn:hover { background: rgba(255,255,255,.18); color: #fff; }
-    .fb-icon-btn.fb-active { background: #4f46e5; border-color: #4f46e5; color: #fff; }
+    .fb-icon-btn:hover {
+        background: rgba(255,255,255,.18);
+        color: #fff;
+        transform: translateY(-1px);
+        box-shadow: 0 2px 8px rgba(0,0,0,.25);
+    }
+    .fb-icon-btn:active {
+        transform: translateY(0);
+    }
+    .fb-icon-btn.fb-active {
+        background: #4f46e5; border-color: #6366f1; color: #fff;
+        box-shadow: 0 2px 10px rgba(79,70,229,.35);
+    }
 
     /* Loading */
     .fb-loading {
         position: absolute; inset: 0; display: flex; flex-direction: column;
         align-items: center; justify-content: center; gap: 1.25rem; z-index: 10;
-        background: #0d1117;
+        background: #0b0f19;
     }
     .fb-loading-icon { width: 48px; height: 48px; }
     .fb-loading-icon circle { stroke: #4f46e5; animation: fb-spin 1s linear infinite; transform-origin: center; }
     @keyframes fb-spin { to { stroke-dashoffset: -200; } }
     .fb-loading-text { color: #a0aec0; font-size: .9rem; }
     .fb-progress-wrap { width: 220px; height: 4px; background: rgba(255,255,255,.1); border-radius: 2px; overflow: hidden; }
-    .fb-progress-bar  { height: 100%; background: linear-gradient(90deg,#4f46e5,#7c3aed); border-radius: 2px; transition: width .25s; }
+    .fb-progress-bar  { height: 100%; background: linear-gradient(90deg,#4f46e5,#7c3aed); border-radius: 2px; transition: width .25s ease; }
 
     /* Stage (where the book lives) */
     .fb-stage {
         flex: 1; display: flex; align-items: center; justify-content: center;
         width: 100%; position: relative; overflow: hidden;
         perspective: 2000px;
+        animation: fbStageIn .3s cubic-bezier(.16,1,.3,1);
+    }
+    @keyframes fbStageIn {
+        from { opacity: 0; transform: scale(.96); }
+        to   { opacity: 1; transform: scale(1); }
     }
 
     /* Navigation arrows */
@@ -259,9 +282,23 @@ $fileSizeHuman = $pdfManager->humanFileSize($pdf['file_size']);
         border: 1px solid rgba(255,255,255,.15); color: #fff;
         width: 44px; height: 44px; border-radius: 50%;
         display: flex; align-items: center; justify-content: center;
-        cursor: pointer; transition: background .2s; font-size: 1.1rem;
+        cursor: pointer;
+        transition: background .2s cubic-bezier(.2,.8,.2,1),
+                    transform .2s cubic-bezier(.2,.8,.2,1),
+                    border-color .2s, box-shadow .2s;
+        font-size: 1.1rem;
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
     }
-    .fb-arrow:hover { background: rgba(79,70,229,.7); border-color: #4f46e5; }
+    .fb-arrow:hover {
+        background: rgba(79,70,229,.85);
+        border-color: #6366f1;
+        transform: translateY(-50%) scale(1.1);
+        box-shadow: 0 4px 18px rgba(79,70,229,.45);
+    }
+    .fb-arrow:active {
+        transform: translateY(-50%) scale(.95);
+    }
     .fb-arrow-left  { left: 1rem; }
     .fb-arrow-right { right: 1rem; }
 
@@ -273,11 +310,14 @@ $fileSizeHuman = $pdfManager->humanFileSize($pdf['file_size']);
         border-top: 1px solid rgba(255,255,255,.08);
         width: 100%;
         justify-content: center;
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
     }
     .fb-page-pill {
         background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.12);
         color: #e2e8f0; font-size: .85rem; border-radius: 20px;
         padding: .3rem 1rem; min-width: 100px; text-align: center;
+        transition: all .2s ease;
     }
     .fb-zoom-label { color: #718096; font-size: .8rem; }
 
@@ -294,33 +334,73 @@ $fileSizeHuman = $pdfManager->humanFileSize($pdf['file_size']);
     .fb-thumbs::-webkit-scrollbar-thumb { background: rgba(255,255,255,.15); border-radius: 2px; }
     .fb-thumb-item {
         flex-shrink: 0; width: 52px; cursor: pointer;
-        opacity: .45; border-radius: 3px; overflow: hidden;
-        border: 2px solid transparent; transition: opacity .2s, transform .15s;
+        opacity: .45; border-radius: 4px; overflow: hidden;
+        border: 2px solid transparent;
+        transition: opacity .2s ease, transform .2s cubic-bezier(.2,.8,.2,1), border-color .2s ease, box-shadow .2s ease;
     }
-    .fb-thumb-item:hover { opacity: .75; transform: scale(1.06); }
-    .fb-thumb-item.fb-thumb-active { opacity: 1; border-color: #4f46e5; }
+    .fb-thumb-item:hover {
+        opacity: .85;
+        transform: translateY(-2px) scale(1.08);
+        box-shadow: 0 4px 12px rgba(0,0,0,.4);
+    }
+    .fb-thumb-item.fb-thumb-active {
+        opacity: 1;
+        border-color: #4f46e5;
+        transform: translateY(-2px) scale(1.05);
+        box-shadow: 0 0 12px rgba(79,70,229,.5);
+    }
     .fb-thumb-item canvas { display: block; width: 100%; height: auto; }
 
     /* Page elements passed to StPageFlip */
     .fb-page {
         background: #fff; overflow: hidden;
         display: flex; align-items: center; justify-content: center;
+        box-shadow: 0 15px 40px rgba(0,0,0,.4);
     }
     .fb-page canvas { display: block; width: 100%; height: 100%; object-fit: contain; }
     /* Hard cover pages */
     .fb-page.fb-cover {
         background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
     }
-    .fb-page.fb-cover canvas { opacity: .92; }
+    .fb-page.fb-cover canvas { opacity: .94; }
 
     /* Book container wrapper (zoom) */
     #fbBookWrap {
         transform-origin: center center;
-        transition: transform .25s;
+        transition: transform .25s cubic-bezier(.2,.8,.2,1);
     }
 
     /* StPageFlip shadow tweak */
     .stf__parent { perspective: 2000px !important; }
+
+    /* Single page 3D container & layers */
+    #fbSinglePage {
+        position: relative;
+        overflow: hidden;
+        box-shadow: 0 25px 65px rgba(0,0,0,.7), 0 0 30px rgba(0,0,0,.35);
+        border-radius: 6px;
+        background: #fff;
+        perspective: 1600px;
+        transform-style: preserve-3d;
+    }
+    .fb-single-layer {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        backface-visibility: hidden;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #fff;
+        overflow: hidden;
+    }
+    .fb-single-layer canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+    }
 
     /* Toolbar toggle button */
     .tool-btn-flipbook {
@@ -661,17 +741,14 @@ const VIEWER_CONFIG = {
         doubleMode:    true,   // effective layout for the current init
         preferDouble:  true,   // what the user asked for (survives resize / mobile auto-switch)
         pdfDoc:        null,   // loaded document (re-used across re-inits)
-        canvases:      [],     // canvases elements
-        renderedState: [],     // 'idle', 'rendering', 'rendered'
-        renderTasks:   [],     // active page.render tasks
-        pdfPages:      [],     // cached PDF.js page objects
+        canvases:      [],     // fully rendered page canvases
         singlePageIdx: 0,      // current page in single-page mode
         singleFlipTo:  null,   // function set during single-mode init
         dispW:         0,
         dispH:         0,
     };
 
-    /* ---------- Audio (page-turn sounds) ---------- */
+    /* ---------- Audio (page-turn sounds with synth fallback) ---------- */
     const flipAudios = [
         new Audio('../assets/sounds/sound1.mp3'),
         new Audio('../assets/sounds/sound2.mp3'),
@@ -679,26 +756,58 @@ const VIEWER_CONFIG = {
     ];
     flipAudios.forEach(a => { a.preload = 'auto'; });
 
+    let synthAudioCtx = null;
+    function playSynthWhoosh() {
+        try {
+            if (!synthAudioCtx) synthAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const sr  = synthAudioCtx.sampleRate;
+            const dur = 0.22;
+            const buf = synthAudioCtx.createBuffer(1, Math.ceil(sr * dur), sr);
+            const d   = buf.getChannelData(0);
+            for (let i = 0; i < d.length; i++) {
+                const t   = i / sr;
+                const env = Math.exp(-t * 18) * Math.sin(Math.PI * t / dur);
+                const noise = (Math.random() * 2 - 1);
+                d[i] = (noise * 0.55 + Math.sin(2 * Math.PI * 180 * t) * 0.08) * env * 0.35;
+            }
+            const filter = synthAudioCtx.createBiquadFilter();
+            filter.type = 'bandpass';
+            filter.frequency.value = 1200;
+            filter.Q.value = 0.7;
+            const gain = synthAudioCtx.createGain();
+            gain.gain.setValueAtTime(1.4, synthAudioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, synthAudioCtx.currentTime + dur);
+            const src = synthAudioCtx.createBufferSource();
+            src.buffer = buf;
+            src.connect(filter);
+            filter.connect(gain);
+            gain.connect(synthAudioCtx.destination);
+            src.start();
+        } catch (_) {}
+    }
+
     function playFlipSound() {
         if (!fb.soundOn) return;
         try {
             const audio = flipAudios[Math.floor(Math.random() * flipAudios.length)];
             audio.currentTime = 0;
-            audio.play().catch(e => console.log('Audio play blocked:', e));
-        } catch (_) {}
+            const p = audio.play();
+            if (p && typeof p.catch === 'function') {
+                p.catch(() => playSynthWhoosh());
+            }
+        } catch (_) {
+            playSynthWhoosh();
+        }
     }
 
     /* ---------- open / close ---------- */
     window.openFlipbook = async function () {
         document.getElementById('fbOverlay').classList.remove('fb-hidden');
         document.body.style.overflow = 'hidden';
-        // Wait 150ms to ensure mobile browsers finish laying out and keyboard collapses
-        await new Promise(r => setTimeout(r, 150));
+        await new Promise(r => setTimeout(r, 100));
         if (!fb.ready) {
             await initFlipbook();
         } else {
-            // closeFlipbook() released every page canvas; re-render the pages
-            // around the current position (they used to stay blank on reopen).
             updateUI(currentFlipIndex());
         }
     };
@@ -711,8 +820,7 @@ const VIEWER_CONFIG = {
     /**
      * Tear down the current book and return a fresh, empty #fbBook element.
      * StPageFlip's destroy() REMOVES the element it was mounted on, so after
-     * the first layout toggle / resize the old code kept rendering into a
-     * detached node and the flipbook went blank.
+     * layout toggles or window resizes, recreating #fbBook keeps the container valid.
      */
     function resetBookElement() {
         if (fb.instance) {
@@ -734,30 +842,7 @@ const VIEWER_CONFIG = {
     window.closeFlipbook = function () {
         document.getElementById('fbOverlay').classList.add('fb-hidden');
         document.body.style.overflow = '';
-        unloadAllFlipbookPages();
     };
-
-    function unloadAllFlipbookPages() {
-        if (!fb.canvases) return;
-        for (let i = 0; i < fb.totalPages; i++) {
-            if (fb.renderedState[i] === 'rendered') {
-                if (fb.renderTasks[i]) {
-                    fb.renderTasks[i].cancel();
-                    fb.renderTasks[i] = null;
-                }
-                const cv = fb.canvases[i];
-                if (!cv) { fb.renderedState[i] = 'idle'; continue; }
-                cv.width = 0;
-                cv.height = 0;
-                fb.renderedState[i] = 'idle';
-                const div = cv.parentElement;
-                if (div) {
-                    const loader = div.querySelector('.fb-page-loader');
-                    if (loader) loader.style.display = 'flex';
-                }
-            }
-        }
-    }
 
     /* ---------- flip controls ---------- */
     window.fbFlipPrev = function () {
@@ -831,7 +916,8 @@ const VIEWER_CONFIG = {
     function updateUI(pageIndex) {
         const total = fb.totalPages;
         const current = pageIndex + 1;
-        document.getElementById('fbPagePill').textContent = `${current} / ${total}`;
+        const pill = document.getElementById('fbPagePill');
+        if (pill) pill.textContent = `${current} / ${total}`;
         
         // Update active class on thumbnails
         document.querySelectorAll('.fb-thumb-item').forEach((el, i) => {
@@ -839,83 +925,6 @@ const VIEWER_CONFIG = {
         });
         const active = document.querySelector('.fb-thumb-item.fb-thumb-active');
         if (active) active.scrollIntoView({ inline: 'center', behavior: 'smooth' });
-
-        // Trigger lazy loading and memory eviction
-        manageFlipbookMemory(pageIndex);
-    }
-
-    /* ---------- Lazy Loading & Memory Eviction ---------- */
-    async function renderFlipbookPage(pageIdx) {
-        if (pageIdx < 0 || pageIdx >= fb.totalPages) return;
-        if (fb.renderedState[pageIdx] === 'rendered' || fb.renderedState[pageIdx] === 'rendering') return;
-
-        fb.renderedState[pageIdx] = 'rendering';
-        const page = fb.pdfPages[pageIdx];
-        const cv = fb.canvases[pageIdx];
-
-        const dpr = Math.min(window.devicePixelRatio || 1, 3);
-        const backingW = Math.round(fb.dispW * dpr);
-        const backingH = Math.round(fb.dispH * dpr);
-        if (cv.width !== backingW || cv.height !== backingH) {
-            cv.width = backingW;
-            cv.height = backingH;
-        }
-
-        const renderScale = backingW / page.getViewport({ scale: 1 }).width;
-        const vp = page.getViewport({ scale: renderScale });
-
-        try {
-            if (fb.renderTasks[pageIdx]) {
-                fb.renderTasks[pageIdx].cancel();
-            }
-            const task = page.render({
-                canvasContext: cv.getContext('2d', { willReadFrequently: true }),
-                viewport: vp
-            });
-            fb.renderTasks[pageIdx] = task;
-            await task.promise;
-            fb.renderedState[pageIdx] = 'rendered';
-
-            const loader = cv.parentElement ? cv.parentElement.querySelector('.fb-page-loader') : null;
-            if (loader) loader.style.display = 'none';
-        } catch (err) {
-            if (err?.name !== 'RenderingCancelledException') {
-                console.warn(`Flipbook Page ${pageIdx + 1} render error:`, err);
-                fb.renderedState[pageIdx] = 'idle';
-            }
-        }
-    }
-
-    function manageFlipbookMemory(currentPageIdx) {
-        const visibleRange = fb.doubleMode ? 2 : 1;
-        const startIdx = Math.max(0, currentPageIdx - 2);
-        const endIdx = Math.min(fb.totalPages - 1, currentPageIdx + (fb.doubleMode ? 3 : 2));
-
-        // 1. Render active and neighborhood pages
-        for (let i = startIdx; i <= endIdx; i++) {
-            renderFlipbookPage(i);
-        }
-
-        // 2. Unload pages outside active range to free GPU RAM
-        for (let i = 0; i < fb.totalPages; i++) {
-            if (i < startIdx || i > endIdx) {
-                if (fb.renderedState[i] === 'rendered') {
-                    if (fb.renderTasks[i]) {
-                        fb.renderTasks[i].cancel();
-                        fb.renderTasks[i] = null;
-                    }
-                    const cv = fb.canvases[i];
-                    if (cv) {
-                        cv.width = 0;
-                        cv.height = 0;
-                    }
-                    fb.renderedState[i] = 'idle';
-                    
-                    const loader = cv.parentElement ? cv.parentElement.querySelector('.fb-page-loader') : null;
-                    if (loader) loader.style.display = 'flex';
-                }
-            }
-        }
     }
 
     /* ---------- Window resize / rotation listener ---------- */
@@ -925,7 +934,6 @@ const VIEWER_CONFIG = {
         if (!fb.ready) return;
         clearTimeout(fbResizeTimer);
         fbResizeTimer = setTimeout(async () => {
-            console.log('[Flipbook] Resize/Rotation detected, re-initializing layout...');
             fb.ready = false;
             resetBookElement();
             await initFlipbook();
@@ -940,7 +948,6 @@ const VIEWER_CONFIG = {
         const bookEl     = resetBookElement();
         const stageEl    = document.getElementById('fbStage');
 
-        console.group('%c[Flipbook] initFlipbook()', 'color:#4f46e5;font-weight:bold');
         loadingEl.style.display = 'flex';
 
         if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
@@ -949,9 +956,7 @@ const VIEWER_CONFIG = {
         }
 
         textEl.textContent = 'Loading document…';
-        // Re-use the document: the main viewer has usually loaded it already
-        // (global `pdfDoc` from viewer.js), and re-inits (resize / layout
-        // toggle) previously downloaded the whole PDF again every time.
+        // Re-use document if already loaded by the main viewer
         if (!fb.pdfDoc) {
             fb.pdfDoc = (typeof window.getViewerPdfDoc === 'function' && window.getViewerPdfDoc())
                 || await pdfjsLib.getDocument({ url: VIEWER_CONFIG.pdfUrl, withCredentials: true }).promise;
@@ -993,13 +998,10 @@ const VIEWER_CONFIG = {
         const dispScale = Math.min(scaleW, scaleH);
         const dispW     = Math.round(pageW  * dispScale);
         const dispH     = Math.round(pageH  * dispScale);
-        const dpr         = Math.min(window.devicePixelRatio || 1, 3);
+        const dpr       = Math.min(window.devicePixelRatio || 1, 3);
 
         bookEl.innerHTML = '';
         fb.canvases = [];
-        fb.renderedState = [];
-        fb.renderTasks = [];
-        fb.pdfPages = [];
         const thumbsEl = document.getElementById('fbThumbs');
         thumbsEl.innerHTML = '';
 
@@ -1009,33 +1011,40 @@ const VIEWER_CONFIG = {
         fb.dispW = dispW; fb.dispH = dispH;
 
         for (let i = 1; i <= fb.totalPages; i++) {
-            textEl.textContent = `Preparing page shells… (${i}/${fb.totalPages})`;
+            textEl.textContent = `Rendering page ${i} of ${fb.totalPages}…`;
             progressEl.style.width = (i / fb.totalPages * 90 + 10) + '%';
 
             const page = await pdfDoc.getPage(i);
-            fb.pdfPages.push(page);
-            fb.renderedState.push('idle');
-            fb.renderTasks.push(null);
+            const vp   = page.getViewport({ scale: 1 });
+            const pW   = vp.width;
+
+            const renderScale = (dispW * dpr) / pW;
+            const rVp = page.getViewport({ scale: renderScale });
 
             const cv = document.createElement('canvas');
             cv.width  = Math.round(dispW * dpr);
             cv.height = Math.round(dispH * dpr);
             cv.style.cssText = 'display:block;width:100%;height:100%;object-fit:contain;';
+            await page.render({
+                canvasContext: cv.getContext('2d', { willReadFrequently: true }),
+                viewport: rVp
+            }).promise;
             fb.canvases.push(cv);
 
+            // Double page element for StPageFlip
             const div = document.createElement('div');
             div.className = 'fb-page' + (i === 1 || i === fb.totalPages ? ' fb-cover' : '');
-            div.style.cssText = `width:${dispW}px;height:${dispH}px;position:relative;`;
+            div.style.cssText = `width:${dispW}px;height:${dispH}px;`;
             
-            const loader = document.createElement('div');
-            loader.className = 'fb-page-loader';
-            loader.style.cssText = 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#1e293b;color:#94a3b8;font-size:0.8rem;z-index:1;';
-            loader.innerHTML = `<span>Loading Page ${i}…</span>`;
-            div.appendChild(loader);
-            
-            div.appendChild(cv);
+            const cvClone = document.createElement('canvas');
+            cvClone.width  = Math.round(dispW * dpr);
+            cvClone.height = Math.round(dispH * dpr);
+            cvClone.style.cssText = 'display:block;width:100%;height:100%;object-fit:contain;';
+            cvClone.getContext('2d').drawImage(cv, 0, 0);
+            div.appendChild(cvClone);
             bookEl.appendChild(div);
 
+            // Thumbnail element
             const tW = 52, tH = Math.round(pageH / pageW * tW);
             const tCv = document.createElement('canvas');
             tCv.width = tW * dpr; tCv.height = tH * dpr;
@@ -1055,13 +1064,14 @@ const VIEWER_CONFIG = {
 
             (async () => {
                 try {
-                    const vp = page.getViewport({ scale: (tW * dpr) / pageW });
-                    await page.render({ canvasContext: tCv.getContext('2d'), viewport: vp }).promise;
+                    const vpThumb = page.getViewport({ scale: (tW * dpr) / pageW });
+                    await page.render({ canvasContext: tCv.getContext('2d'), viewport: vpThumb }).promise;
                 } catch (_) {}
             })();
         }
 
         if (fb.doubleMode) {
+            /* ── Double-page mode: 3D Book Curl with StPageFlip ── */
             const pf = new St.PageFlip(bookEl, {
                 width:               dispW,
                 height:              dispH,
@@ -1071,11 +1081,11 @@ const VIEWER_CONFIG = {
                 minHeight:           200,
                 maxHeight:           dispH,
                 drawShadow:          true,
-                flippingTime:        600,
+                flippingTime:        700,
                 usePortrait:         false,
                 startZIndex:         0,
                 autoSize:            false,
-                maxShadowOpacity:    0.35,
+                maxShadowOpacity:    0.5,
                 showCover:           true,
                 mobileScrollSupport: true,
                 clickEventForward:   true,
@@ -1089,6 +1099,7 @@ const VIEWER_CONFIG = {
             fb.instance = pf;
 
         } else {
+            /* ── Single-page mode: 3D Perspective Leaf Turn ── */
             bookEl.innerHTML = '';
             fb.singlePageIdx = 0;
 
@@ -1096,52 +1107,71 @@ const VIEWER_CONFIG = {
             singleEl.id = 'fbSinglePage';
             singleEl.style.cssText = [
                 `width:${dispW}px`, `height:${dispH}px`,
-                'overflow:hidden', 'position:relative',
-                'box-shadow:0 30px 70px rgba(0,0,0,.65)',
-                'transform-style:preserve-3d',
-                'border-radius:6px',
-                'background:#fff',
+                'position:relative', 'overflow:hidden',
+                'box-shadow:0 25px 65px rgba(0,0,0,.7), 0 0 30px rgba(0,0,0,.35)',
+                'border-radius:6px', 'background:#fff',
+                'perspective:1600px', 'transform-style:preserve-3d',
             ].join(';');
             bookEl.appendChild(singleEl);
 
-            function renderSinglePage(idx, dir) {
-                fb.singlePageIdx = idx;
-                const cv = fb.canvases[idx];
-                cv.style.cssText = 'display:block;width:100%;height:100%;object-fit:contain;';
+            let isAnimating = false;
 
-                if (dir) {
-                    const fromX = dir === 'next' ? '60px' : '-60px';
-                    const rotateVal = dir === 'next' ? 12 : -12;
-                    singleEl.style.cssText += `;transition:none;opacity:0;transform:perspective(1400px) translateX(${fromX}) rotateY(${rotateVal}deg)`;
-                    singleEl.innerHTML = '';
-                    
-                    if (fb.renderedState[idx] !== 'rendered') {
-                        const loader = document.createElement('div');
-                        loader.className = 'fb-page-loader';
-                        loader.style.cssText = 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#1e293b;color:#94a3b8;font-size:0.8rem;z-index:1;';
-                        loader.innerHTML = `<span>Loading Page ${idx + 1}…</span>`;
-                        singleEl.appendChild(loader);
-                    }
-                    singleEl.appendChild(cv);
-                    requestAnimationFrame(() => requestAnimationFrame(() => {
-                        singleEl.style.transition = 'opacity .28s ease, transform .32s cubic-bezier(.22,1,.36,1)';
-                        singleEl.style.opacity    = '1';
-                        singleEl.style.transform  = 'perspective(1400px) translateX(0) rotateY(0deg)';
-                    }));
+            function renderSinglePage(idx, dir) {
+                if (idx < 0 || idx >= fb.totalPages) return;
+                fb.singlePageIdx = idx;
+
+                const cv = fb.canvases[idx];
+                const cvEl = document.createElement('canvas');
+                cvEl.width  = Math.round(dispW * dpr);
+                cvEl.height = Math.round(dispH * dpr);
+                cvEl.style.cssText = 'display:block;width:100%;height:100%;object-fit:contain;';
+                cvEl.getContext('2d').drawImage(cv, 0, 0);
+
+                const newLayer = document.createElement('div');
+                newLayer.className = 'fb-single-layer';
+                newLayer.appendChild(cvEl);
+
+                const curLayer = singleEl.querySelector('.fb-single-layer');
+
+                if (dir && curLayer && !isAnimating) {
+                    isAnimating = true;
+                    const isNext = dir === 'next';
+                    curLayer.style.zIndex = '2';
+                    newLayer.style.zIndex = '1';
+                    curLayer.style.transformOrigin = isNext ? 'left center' : 'right center';
+                    newLayer.style.transformOrigin = isNext ? 'right center' : 'left center';
+
+                    newLayer.style.transform = `perspective(1600px) rotateY(${isNext ? '30deg' : '-30deg'}) scale(0.96)`;
+                    newLayer.style.opacity   = '0.7';
+                    singleEl.appendChild(newLayer);
+
+                    requestAnimationFrame(() => {
+                        requestAnimationFrame(() => {
+                            curLayer.style.transition = 'transform 0.42s cubic-bezier(0.25, 1, 0.5, 1), opacity 0.38s ease';
+                            curLayer.style.transform  = `perspective(1600px) rotateY(${isNext ? '-85deg' : '85deg'}) scale(0.92)`;
+                            curLayer.style.opacity    = '0';
+
+                            newLayer.style.transition = 'transform 0.42s cubic-bezier(0.25, 1, 0.5, 1), opacity 0.38s ease';
+                            newLayer.style.transform  = 'perspective(1600px) rotateY(0deg) scale(1)';
+                            newLayer.style.opacity    = '1';
+
+                            setTimeout(() => {
+                                if (curLayer.parentNode === singleEl) {
+                                    singleEl.removeChild(curLayer);
+                                }
+                                newLayer.style.transition = 'none';
+                                newLayer.style.zIndex = '1';
+                                isAnimating = false;
+                            }, 430);
+                        });
+                    });
                 } else {
-                    singleEl.style.transition = 'none';
-                    singleEl.style.opacity    = '1';
-                    singleEl.style.transform  = 'none';
-                    singleEl.innerHTML        = '';
-                    if (fb.renderedState[idx] !== 'rendered') {
-                        const loader = document.createElement('div');
-                        loader.className = 'fb-page-loader';
-                        loader.style.cssText = 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#1e293b;color:#94a3b8;font-size:0.8rem;z-index:1;';
-                        loader.innerHTML = `<span>Loading Page ${idx + 1}…</span>`;
-                        singleEl.appendChild(loader);
-                    }
-                    singleEl.appendChild(cv);
+                    singleEl.innerHTML = '';
+                    newLayer.style.transform = 'none';
+                    newLayer.style.opacity   = '1';
+                    singleEl.appendChild(newLayer);
                 }
+
                 updateUI(idx);
                 playFlipSound();
             }
@@ -1177,7 +1207,6 @@ const VIEWER_CONFIG = {
         document.getElementById('fbControls').style.display  = 'flex';
         document.getElementById('fbThumbsBar').style.display = 'block';
         updateUI(0);
-        console.groupEnd();
     }
 }());
 </script>
